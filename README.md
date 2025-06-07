@@ -3,7 +3,7 @@ Viewport_Notes.py - добавляет функцию заметок а такж
 ![image](https://github.com/user-attachments/assets/d2bef961-d422-4476-8cbe-f2fb176bd92c)
 
 
-Vertex_at_cursor.py - Добавляет вертекс на выбранном или ближайшем ребре находящимися под курсором мыши. Функция находится в меню ПКМ в режиме Edit mode.
+Vertex_at_cursor.py - Добавляет вертекс на выбранном или ближайшем ребре находящимися под курсором мыши. Функция находится в меню ПКМ в режиме Edit mode, для работы вам сначала нужно назначить хоткей.
 
 ![image](https://github.com/user-attachments/assets/cdbb7368-8fc3-49a8-a7b9-0c7b1c521e69)
 
