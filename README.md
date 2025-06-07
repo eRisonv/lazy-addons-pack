@@ -1,5 +1,8 @@
-Viewport_Notes.py - заметки внутри блендера, вы можете управлять ими через настройки аддона.
-Edit_mode.py - Shows current edit mode in viewport
-Vertex_at_cursor.py - Добавляет вертекс на выбранном или ближайшем ребре под курсором мыши.
-auto-xray-wireframe.py - Включает XRay в режиме wireframe и восстанавливает прежнее состояние при выходе.
+Viewport_Notes.py - добавляет функцию заметок а также отображает скейл выделеного меша во вьюпорте. Управление заметками происходит через настройки аддона в preference.
+
+Vertex_at_cursor.py - Добавляет вертекс на выбранном или ближайшем ребре находящимися под курсором мыши.
+
+auto-xray-wireframe.py - Предотвращает случайные выключения xray в режиме wireframe, автоматически включая его.
+![image](https://github.com/user-attachments/assets/dd04f243-fee8-4112-bd2b-77a547815383)
+
 Easy_Silhouette.py - режим сверки силуэта.
