@@ -1,6 +1,5 @@
 Vertex_at_cursor.py - Добавляет вертекс на выбранном или ближайшем ребре находящимися под курсором мыши. Функция находится в меню ПКМ в режиме Edit mode, для работы вам сначала нужно назначить хоткей.
 
-![image](https://github.com/user-attachments/assets/cdbb7368-8fc3-49a8-a7b9-0c7b1c521e69)
 ![ezgif-4ed0a64d920e61](https://github.com/user-attachments/assets/5396b418-d333-4a31-85b2-39b0e7e5fcf8)
 
 
