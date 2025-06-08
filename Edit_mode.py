@@ -1,6 +1,6 @@
 bl_info = {
     "name": "Edit Mode Display",
-    "author": "Gwyn",
+    "author": "eRisonv",
     "version": (1, 1),
     "blender": (2, 80, 0),
     "location": "View3D > Viewport Overlays",

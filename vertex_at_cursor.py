@@ -6,7 +6,7 @@ from bpy_extras import view3d_utils
 
 bl_info = {
     "name": "Add Vertex at Cursor",
-    "author": "Distortion",
+    "author": "eRisonv",
     "version": (1, 6),
     "blender": (2, 80, 0),
     "location": "Edit Mode > Right Click > Add Vertex at Mouse / Connect Selected Vertex at Cursor",

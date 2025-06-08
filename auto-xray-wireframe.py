@@ -1,6 +1,6 @@
 bl_info = {
     "name": "Auto XRay for Wireframe with State Restore",
-    "author": "Distortion",
+    "author": "eRisonv",
     "version": (1, 3),
     "blender": (4, 0, 2),
     "location": "View3D",

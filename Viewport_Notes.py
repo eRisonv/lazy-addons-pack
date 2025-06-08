@@ -1,6 +1,6 @@
 bl_info = {
     "name": "Viewport Notes",
-    "author": "Distortion",
+    "author": "eRisonv",
     "version": (1, 2),
     "blender": (2, 80, 0),
     "location": "View3D > Viewport Overlays, Shortcut: Ctrl+Q",
