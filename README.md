@@ -6,7 +6,8 @@ Viewport_Notes.py - добавляет функцию заметок а такж
 Vertex_at_cursor.py - Добавляет вертекс на выбранном или ближайшем ребре находящимися под курсором мыши. Функция находится в меню ПКМ в режиме Edit mode, для работы вам сначала нужно назначить хоткей.
 
 ![image](https://github.com/user-attachments/assets/cdbb7368-8fc3-49a8-a7b9-0c7b1c521e69)
-![ezgif-10478fdbfa3ae1](https://github.com/user-attachments/assets/f47796a2-7a41-4364-afac-d8ebc5f1df4f)
+![ezgif-4ed0a64d920e61](https://github.com/user-attachments/assets/5396b418-d333-4a31-85b2-39b0e7e5fcf8)
+
 
 
 auto-xray-wireframe.py - Предотвращает случайные выключения xray в режиме wireframe, автоматически включая его.
