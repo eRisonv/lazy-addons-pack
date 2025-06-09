@@ -1,18 +1,18 @@
-import bpy
-import bmesh
-from mathutils import Vector
-import mathutils
-from bpy_extras import view3d_utils
-
 bl_info = {
     "name": "Add Vertex at Cursor",
     "author": "eRisonv",
-    "version": (1, 6),
+    "version": (1, 2),
     "blender": (2, 80, 0),
     "location": "Edit Mode > Right Click > Add Vertex at Mouse / Connect Selected Vertex at Cursor",
     "description": "Adds vertex on selected/closest edge to cursor with optional auto-connect and intersection handling",
     "category": "Mesh",
 }
+
+import bpy
+import bmesh
+from mathutils import Vector
+import mathutils
+from bpy_extras import view3d_utils
 
 class MESH_OT_add_vertex_at_cursor(bpy.types.Operator):
     """Add vertex on selected edge or closest to cursor edge"""
@@ -267,6 +267,31 @@ class MESH_OT_connect_selected_vertex_at_cursor(bpy.types.Operator):
                         best_t = max(0.05, min(0.95, t))
         return closest_edge, best_t, min_distance
     
+    def find_vertex_under_cursor(self, context, mouse_coord, bm, obj, tolerance=20):
+        """Find vertex under cursor within tolerance"""
+        region = context.region
+        rv3d = context.region_data
+        mouse_vec = Vector(mouse_coord)
+        closest_vertex = None
+        min_distance = float('inf')
+        
+        for vert in bm.verts:
+            vert_world = obj.matrix_world @ vert.co
+            vert_view = rv3d.view_matrix @ vert_world.to_4d()
+            
+            # Проверяем, что вершина видна (не за камерой)
+            if vert_view.z > 0:
+                continue
+                
+            screen_coord = view3d_utils.location_3d_to_region_2d(region, rv3d, vert_world)
+            if screen_coord:
+                distance = (mouse_vec - screen_coord).length
+                if distance < tolerance and distance < min_distance:
+                    min_distance = distance
+                    closest_vertex = vert
+                    
+        return closest_vertex, min_distance
+    
     def get_active_vert(self, bm):
         """Получить активную вершину из истории выделения"""
         if bm.select_history:
@@ -288,9 +313,72 @@ class MESH_OT_connect_selected_vertex_at_cursor(bpy.types.Operator):
         bm.faces.ensure_lookup_table()
         bm.normal_update()
         
-        # Получаем выделенные вершины (может быть пустой список)
+        # Получаем выделенные вершины
         selected_vertices = [v for v in bm.verts if v.select]
         
+        # Проверяем, есть ли вершина под курсором
+        vertex_under_cursor, cursor_distance = self.find_vertex_under_cursor(context, mouse_coord, bm, obj)
+        
+        # Если есть выделенные вершины и вершина под курсором, выполняем Join
+        if selected_vertices and vertex_under_cursor and vertex_under_cursor not in selected_vertices:
+            connections_created = 0
+            
+            # Соединяем все выделенные вершины с вершиной под курсором
+            for selected_vert in selected_vertices:
+                try:
+                    result = bmesh.ops.connect_vert_pair(bm, verts=[selected_vert, vertex_under_cursor])
+                    if result.get('edges'):
+                        connections_created += 1
+                except:
+                    try:
+                        result = bmesh.ops.connect_verts(bm, verts=[selected_vert, vertex_under_cursor])
+                        if result.get('edges'):
+                            connections_created += 1
+                    except:
+                        # Прямое создание ребра если другие методы не работают
+                        edge_exists = False
+                        for edge in selected_vert.link_edges:
+                            if vertex_under_cursor in edge.verts:
+                                edge_exists = True
+                                break
+                        
+                        if not edge_exists:
+                            # Проверяем, находятся ли вершины на одной грани
+                            shared_faces = set(selected_vert.link_faces) & set(vertex_under_cursor.link_faces)
+                            if shared_faces:
+                                bm.edges.new([selected_vert, vertex_under_cursor])
+                                connections_created += 1
+            
+            # Обновляем lookup tables
+            bm.edges.ensure_lookup_table()
+            bm.verts.ensure_lookup_table()
+            bm.faces.ensure_lookup_table()
+            
+            # Очищаем выделения и выделяем только вершину под курсором
+            for e in bm.edges:
+                e.select = False
+            for v in bm.verts:
+                v.select = False
+            for f in bm.faces:
+                f.select = False
+            
+            vertex_under_cursor.select = True
+            bm.select_history.clear()
+            bm.select_history.add(vertex_under_cursor)
+            
+            bmesh.update_edit_mesh(obj.data, loop_triangles=True, destructive=True)
+            for area in context.screen.areas:
+                if area.type == 'VIEW_3D':
+                    area.tag_redraw()
+            
+            if connections_created > 0:
+                self.report({'INFO'}, f"Connected {connections_created} vertices to vertex under cursor")
+            else:
+                self.report({'WARNING'}, "No connections could be created")
+            
+            return {'FINISHED'}
+        
+        # Если нет вершины под курсором или нет выделенных вершин, выполняем обычную логику
         select_mode = context.tool_settings.mesh_select_mode
         is_edge_mode = select_mode[1]
         is_vertex_mode = select_mode[0]
