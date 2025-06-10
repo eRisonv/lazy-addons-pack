@@ -418,8 +418,8 @@ class MESH_OT_connect_selected_vertex_at_cursor(bpy.types.Operator):
         
         return closest_edge, best_t, min_distance
     
-    def find_vertex_under_cursor(self, context, mouse_coord, bm, obj, tolerance=20):
-        """Находит видимый вертекс под курсором в пределах толерантности"""
+    def find_vertex_under_cursor(self, context, mouse_coord, bm, obj, tolerance=30):
+        """Находит любой видимый вертекс под курсором в пределах толерантности (включая выделенные)"""
         region = context.region
         rv3d = context.region_data
         mouse_vec = Vector(mouse_coord)
@@ -427,12 +427,15 @@ class MESH_OT_connect_selected_vertex_at_cursor(bpy.types.Operator):
         min_distance = float('inf')
         
         for vert in bm.verts:
-            if not self.is_vertex_visible(context, vert, obj, bm):  # Пропускаем невидимые вертексы
+            # Пропускаем только невидимые вертексы
+            if not self.is_vertex_visible(context, vert, obj, bm):
                 continue
+                
             vert_world = obj.matrix_world @ vert.co
             vert_view = rv3d.view_matrix @ vert_world.to_4d()
             
-            if vert_view.z > 0:  # Пропускаем вертексы за камерой
+            # Пропускаем вертексы за камерой
+            if vert_view.z > 0:
                 continue
                 
             screen_coord = view3d_utils.location_3d_to_region_2d(region, rv3d, vert_world)
@@ -458,38 +461,57 @@ class MESH_OT_connect_selected_vertex_at_cursor(bpy.types.Operator):
         bm.normal_update()
         
         selected_vertices = [v for v in bm.verts if v.select]
-        vertex_under_cursor, cursor_distance = self.find_vertex_under_cursor(context, mouse_coord, bm, obj)
         
-        if selected_vertices and vertex_under_cursor and vertex_under_cursor not in selected_vertices:
+        # Сначала ищем вертекс под курсором с повышенным приоритетом
+        vertex_under_cursor, cursor_distance = self.find_vertex_under_cursor(context, mouse_coord, bm, obj, tolerance=35)
+        
+        # Если не нашли вертекс рядом, пробуем с меньшей толерантностью но более точно
+        if not vertex_under_cursor:
+            vertex_under_cursor, cursor_distance = self.find_vertex_under_cursor(context, mouse_coord, bm, obj, tolerance=20)
+        
+        # ИСПРАВЛЕНО: Обработка случая когда выбрано 2+ вертекса и мышь на любом вертексе (включая выделенные)
+        if len(selected_vertices) >= 2 and vertex_under_cursor:
             connections_created = 0
             
+            # Соединяем все выбранные вертексы с вертексом под курсором (кроме самого себя)
             for selected_vert in selected_vertices:
-                try:
-                    result = bmesh.ops.connect_vert_pair(bm, verts=[selected_vert, vertex_under_cursor])
-                    if result.get('edges'):
-                        connections_created += 1
-                except:
+                if selected_vert == vertex_under_cursor:
+                    continue  # Пропускаем если это тот же вертекс
+                    
+                # Проверяем, не существует ли уже ребро между вертексами
+                edge_exists = False
+                for edge in selected_vert.link_edges:
+                    if vertex_under_cursor in edge.verts:
+                        edge_exists = True
+                        break
+                
+                if not edge_exists:
                     try:
-                        result = bmesh.ops.connect_verts(bm, verts=[selected_vert, vertex_under_cursor])
+                        # Пытаемся соединить через bmesh операции
+                        result = bmesh.ops.connect_vert_pair(bm, verts=[selected_vert, vertex_under_cursor])
                         if result.get('edges'):
                             connections_created += 1
                     except:
-                        edge_exists = False
-                        for edge in selected_vert.link_edges:
-                            if vertex_under_cursor in edge.verts:
-                                edge_exists = True
-                                break
-                        
-                        if not edge_exists:
-                            shared_faces = set(selected_vert.link_faces) & set(vertex_under_cursor.link_faces)
-                            if shared_faces:
-                                bm.edges.new([selected_vert, vertex_under_cursor])
+                        try:
+                            result = bmesh.ops.connect_verts(bm, verts=[selected_vert, vertex_under_cursor])
+                            if result.get('edges'):
                                 connections_created += 1
+                        except:
+                            # Если bmesh операции не работают, создаем ребро напрямую
+                            try:
+                                new_edge = bm.edges.new([selected_vert, vertex_under_cursor])
+                                connections_created += 1
+                            except ValueError:
+                                # Ребро уже существует или другая ошибка
+                                pass
             
+            # Обновляем таблицы после создания соединений
             bm.edges.ensure_lookup_table()
             bm.verts.ensure_lookup_table()
             bm.faces.ensure_lookup_table()
+            bm.normal_update()
             
+            # Очищаем выделение и выделяем только целевой вертекс
             for e in bm.edges:
                 e.select = False
             for v in bm.verts:
@@ -506,12 +528,76 @@ class MESH_OT_connect_selected_vertex_at_cursor(bpy.types.Operator):
                 if area.type == 'VIEW_3D':
                     area.tag_redraw()
             
-            if connections_created == 0:
-                self.report({'WARNING'}, "No connections could be created")
+            if connections_created > 0:
+                self.report({'INFO'}, f"Connected {connections_created} vertices to target vertex")
+            else:
+                self.report({'WARNING'}, "No new connections could be created")
             
             return {'FINISHED'}
         
-        # Основная логика создания вертекса
+        # Случай когда выбран 1 вертекс и мышь на другом вертексе
+        elif len(selected_vertices) == 1 and vertex_under_cursor and vertex_under_cursor != selected_vertices[0]:
+            selected_vert = selected_vertices[0]
+            
+            # Проверяем, не существует ли уже ребро
+            edge_exists = False
+            for edge in selected_vert.link_edges:
+                if vertex_under_cursor in edge.verts:
+                    edge_exists = True
+                    break
+            
+            if not edge_exists:
+                try:
+                    result = bmesh.ops.connect_vert_pair(bm, verts=[selected_vert, vertex_under_cursor])
+                    if result.get('edges'):
+                        connections_created = 1
+                    else:
+                        connections_created = 0
+                except:
+                    try:
+                        result = bmesh.ops.connect_verts(bm, verts=[selected_vert, vertex_under_cursor])
+                        if result.get('edges'):
+                            connections_created = 1
+                        else:
+                            connections_created = 0
+                    except:
+                        try:
+                            bm.edges.new([selected_vert, vertex_under_cursor])
+                            connections_created = 1
+                        except ValueError:
+                            connections_created = 0
+                
+                bm.edges.ensure_lookup_table()
+                bm.verts.ensure_lookup_table()
+                bm.faces.ensure_lookup_table()
+                
+                for e in bm.edges:
+                    e.select = False
+                for v in bm.verts:
+                    v.select = False
+                for f in bm.faces:
+                    f.select = False
+                
+                vertex_under_cursor.select = True
+                bm.select_history.clear()
+                bm.select_history.add(vertex_under_cursor)
+                
+                bmesh.update_edit_mesh(obj.data, loop_triangles=True, destructive=True)
+                for area in context.screen.areas:
+                    if area.type == 'VIEW_3D':
+                        area.tag_redraw()
+                
+                if connections_created > 0:
+                    self.report({'INFO'}, "Connected vertices")
+                else:
+                    self.report({'WARNING'}, "Could not create connection")
+                
+                return {'FINISHED'}
+            else:
+                self.report({'INFO'}, "Vertices are already connected")
+                return {'FINISHED'}
+        
+        # Основная логика создания вертекса на ребре (если не было соединения вертексов)
         select_mode = context.tool_settings.mesh_select_mode
         is_edge_mode = select_mode[1]
         
