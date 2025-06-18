@@ -1,7 +1,7 @@
 bl_info = {
     "name": "Add Vertex at Cursor",
     "author": "eRisonv",
-    "version": (1, 3),
+    "version": (1, 4),
     "blender": (2, 80, 0),
     "location": "Edit Mode > Right Click > Add Vertex at Mouse / Connect Selected Vertex at Cursor",
     "description": "Adds vertex on selected/closest edge to cursor with precise positioning",
@@ -393,27 +393,17 @@ class MESH_OT_connect_selected_vertex_at_cursor(bpy.types.Operator):
         return ray_origin, ray_direction
         
     def is_vertex_visible(self, context, vert, obj, bm):
-        """Проверяет, виден ли вертекс с точки зрения камеры, учитывая нормали"""
         region = context.region
         rv3d = context.region_data
         vert_world = obj.matrix_world @ vert.co
         ray_origin = view3d_utils.region_2d_to_origin_3d(region, rv3d, (region.width/2, region.height/2))
         ray_direction = (vert_world - ray_origin).normalized()
-        distance = (vert_world - ray_origin).length + 0.001
-        
-        success, location, normal, index = obj.ray_cast(ray_origin, ray_direction, distance=distance)
-        
+        distance = (vert_world - ray_origin).length
+        success, hit_location, hit_normal, hit_index = obj.ray_cast(ray_origin, ray_direction, distance=distance)
         if not success:
-            return True  # Raycast не попал в грань — вертекс виден
-        
-        hit_face = bm.faces[index] if index >= 0 else None
-        if hit_face in vert.link_faces:
-            # Проверяем, что нормаль грани смотрит в сторону камеры
-            face_normal_world = obj.matrix_world.to_3x3() @ hit_face.normal
-            view_direction = (ray_origin - vert_world).normalized()
-            if face_normal_world.dot(view_direction) > 0:
-                return True  # Нормаль смотрит в сторону камеры — вертекс виден
-        return False  # Вершина перекрыта или нормаль смотрит в другую сторону
+            return True
+        distance_to_hit = (hit_location - ray_origin).length
+        return distance_to_hit >= distance - 0.001
     
     def ray_to_line_closest_points(self, ray_origin, ray_direction, line_start, line_end):
         """Находит ближайшие точки между лучом и отрезком в 3D"""
@@ -613,29 +603,36 @@ class MESH_OT_connect_selected_vertex_at_cursor(bpy.types.Operator):
             return None, 0.5, float('inf')
     
     def find_vertex_under_cursor(self, context, mouse_coord, bm, obj, tolerance=30):
-        """Находит вершину под курсором с более простой логикой."""
         region = context.region
         rv3d = context.region_data
+        camera_pos = view3d_utils.region_2d_to_origin_3d(region, rv3d, (region.width/2, region.height/2))
         
         closest_vertex = None
         min_distance = float('inf')
         
-        # Просто ищем ближайшую вершину к курсору на экране
         for vert in bm.verts:
-            # Проверяем базовую видимость вершины
             if not self.is_vertex_visible(context, vert, obj, bm):
                 continue
-                
-            # Получаем координаты вершины на экране
+            
             vert_world = obj.matrix_world @ vert.co
             screen_coord = view3d_utils.location_3d_to_region_2d(region, rv3d, vert_world)
             
             if screen_coord:
-                # Вычисляем расстояние от курсора до вершины на экране
-                distance = (Vector(mouse_coord) - screen_coord).length
-                if distance < tolerance and distance < min_distance:
-                    min_distance = distance
-                    closest_vertex = vert
+                screen_dist = (Vector(mouse_coord) - screen_coord).length
+                if screen_dist < tolerance:
+                    # Check if the vertex is on a front-facing face
+                    is_front_vertex = False
+                    for face in vert.link_faces:
+                        normal_world = (obj.matrix_world.to_3x3() @ face.normal).normalized()
+                        face_center_world = obj.matrix_world @ face.calc_center_median()
+                        view_dir = (camera_pos - face_center_world).normalized()
+                        if normal_world.dot(view_dir) > 0:
+                            is_front_vertex = True
+                            break
+                    if is_front_vertex:
+                        if screen_dist < min_distance:
+                            min_distance = screen_dist
+                            closest_vertex = vert
         
         return closest_vertex, min_distance
     
