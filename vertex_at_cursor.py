@@ -15,7 +15,6 @@ import mathutils
 from bpy_extras import view3d_utils
 import gpu
 from gpu_extras.batch import batch_for_shader
-from mathutils import Vector
 
 class MESH_OT_add_vertex_at_cursor(bpy.types.Operator):
     """Add vertex on selected edge or closest to cursor edge"""
@@ -34,7 +33,6 @@ class MESH_OT_add_vertex_at_cursor(bpy.types.Operator):
         region = context.region
         rv3d = context.region_data
         
-        # Получаем направление луча от курсора
         ray_origin = view3d_utils.region_2d_to_origin_3d(region, rv3d, mouse_coord)
         ray_direction = view3d_utils.region_2d_to_vector_3d(region, rv3d, mouse_coord)
         
@@ -71,14 +69,12 @@ class MESH_OT_add_vertex_at_cursor(bpy.types.Operator):
         denominator = a * c - b * b
         
         if abs(denominator) < 1e-6:
-            # Линии параллельны
             t_line = 0.0
             t_ray = d / a if abs(a) > 1e-6 else 0.0
         else:
             t_ray = (b * e - c * d) / denominator
             t_line = (a * e - b * d) / denominator
         
-        # Ограничиваем t_line отрезком [0, 1]
         t_line = max(0.0, min(1.0, t_line))
         
         point_on_ray = ray_origin + t_ray * ray_direction
@@ -95,12 +91,10 @@ class MESH_OT_add_vertex_at_cursor(bpy.types.Operator):
         
         vert_world = obj.matrix_world @ vert.co
         
-        # Проверяем, что вершина перед камерой
         vert_view = rv3d.view_matrix @ vert_world.to_4d()
         if vert_view.z > 0:
             return False
         
-        # Raycast от камеры к вершине
         ray_origin = view3d_utils.region_2d_to_origin_3d(region, rv3d, (region.width/2, region.height/2))
         ray_direction = (vert_world - ray_origin).normalized()
         distance = (vert_world - ray_origin).length
@@ -112,33 +106,28 @@ class MESH_OT_add_vertex_at_cursor(bpy.types.Operator):
         if not success:
             return True
         
-        # Проверяем, не слишком ли близко препятствие
         distance_to_hit = (hit_location - ray_origin).length
-        return distance_to_hit >= distance - 0.001
+        return distance_to_hit >= distance - 0.01
     
     def is_edge_visible_like_knife(self, context, edge, obj, bm):
         """Проверка видимости ребра как в инструменте Knife"""
         region = context.region
         rv3d = context.region_data
         
-        # Получаем мировые координаты вершин
         v1_world = obj.matrix_world @ edge.verts[0].co
         v2_world = obj.matrix_world @ edge.verts[1].co
         
-        # Проверяем, что обе вершины перед камерой
         v1_view = rv3d.view_matrix @ v1_world.to_4d()
         v2_view = rv3d.view_matrix @ v2_world.to_4d()
         if v1_view.z > 0 or v2_view.z > 0:
             return False
         
-        # Проецируем на экран
         screen_v1 = view3d_utils.location_3d_to_region_2d(region, rv3d, v1_world)
         screen_v2 = view3d_utils.location_3d_to_region_2d(region, rv3d, v2_world)
         if not screen_v1 or not screen_v2:
             return False
         
-        # Проверяем несколько точек вдоль ребра (как делает Knife)
-        test_points = 5
+        test_points = 10  # Увеличено для большей точности
         for i in range(test_points):
             t = i / (test_points - 1)
             test_point_world = v1_world.lerp(v2_world, t)
@@ -147,22 +136,18 @@ class MESH_OT_add_vertex_at_cursor(bpy.types.Operator):
             if not screen_point:
                 continue
             
-            # Raycast от курсора вглубь сцены (как делает Knife)
             ray_origin = view3d_utils.region_2d_to_origin_3d(region, rv3d, screen_point)
             ray_direction = view3d_utils.region_2d_to_vector_3d(region, rv3d, screen_point)
             
-            # Выполняем raycast
             success, hit_location, hit_normal, hit_index = obj.ray_cast(
                 ray_origin, ray_direction, distance=1000.0
             )
             
             if success:
-                # Проверяем, что первое попадание - это наша тестовая точка
                 distance_to_test = (test_point_world - ray_origin).length
                 distance_to_hit = (hit_location - ray_origin).length
                 
-                # Если разница больше допустимой погрешности, значит ребро скрыто
-                if abs(distance_to_test - distance_to_hit) > 0.001:
+                if abs(distance_to_test - distance_to_hit) > 0.01:  # Увеличенный допуск
                     return False
         
         return True
@@ -177,7 +162,7 @@ class MESH_OT_add_vertex_at_cursor(bpy.types.Operator):
         if not success:
             return True
         hit_distance = (hit_location - ray_origin).length
-        return hit_distance >= distance - 0.001
+        return hit_distance >= distance - 0.01
 
     def is_edge_visible(self, context, edge, obj, bm, ray_origin, ray_direction):
         """Проверяет, видимо ли ребро"""
@@ -186,71 +171,51 @@ class MESH_OT_add_vertex_at_cursor(bpy.types.Operator):
         mid_point = v1_world.lerp(v2_world, 0.5)
         return self.is_point_visible(context, mid_point, obj, ray_origin)
     
-    def find_closest_edge_to_cursor(self, context, mouse_coord, bm, obj):
+    def find_closest_visible_edge_to_cursor(self, context, mouse_coord, bm, obj):
+        """Находит ближайшее видимое ребро к курсору в экранном пространстве"""
         region = context.region
         rv3d = context.region_data
         
-        # Получаем позицию камеры
-        camera_pos = rv3d.view_matrix.inverted().translation
-        
-        # Бросаем луч от курсора
         ray_origin = view3d_utils.region_2d_to_origin_3d(region, rv3d, mouse_coord)
         ray_direction = view3d_utils.region_2d_to_vector_3d(region, rv3d, mouse_coord)
         
-        # Находим первую грань, в которую попал луч
-        success, hit_location, hit_normal, hit_index = obj.ray_cast(ray_origin, ray_direction)
-        if not success:
-            return None, 0.5, float('inf')
+        visible_edges = [edge for edge in bm.edges if self.is_edge_visible_like_knife(context, edge, obj, bm)]
         
-        # Берём рёбра только первой грани
-        hit_face = bm.faces[hit_index]
-        candidate_edges = hit_face.edges
+        if not visible_edges:
+            return None, 0.5, float('inf')
         
         closest_edge = None
         min_distance = float('inf')
         best_t = 0.5
         
-        for edge in candidate_edges:
-            v1_world = obj.matrix_world @ edge.verts[0].co
-            v2_world = obj.matrix_world @ edge.verts[1].co
+        for edge in visible_edges:
+            v1 = obj.matrix_world @ edge.verts[0].co
+            v2 = obj.matrix_world @ edge.verts[1].co
             
-            # Проверяем видимость нескольких точек на ребре
-            visible = True
-            for t in [0.0, 0.5, 1.0]:  # Проверяем начало, середину и конец
-                test_point = v1_world.lerp(v2_world, t)
-                if not self.is_point_visible(context, test_point, obj, camera_pos):
-                    visible = False
-                    break
-            if not visible:
+            distance_3d, t_3d, point_on_line = self.ray_to_line_closest_points(ray_origin, ray_direction, v1, v2)
+            
+            screen_point = view3d_utils.location_3d_to_region_2d(region, rv3d, point_on_line)
+            if not screen_point:
                 continue
             
-            # Проверяем расстояние до ребра на экране
-            screen_v1 = view3d_utils.location_3d_to_region_2d(region, rv3d, v1_world)
-            screen_v2 = view3d_utils.location_3d_to_region_2d(region, rv3d, v2_world)
+            cursor_vec = Vector(mouse_coord)
+            distance_screen = (cursor_vec - screen_point).length
             
-            if not screen_v1 or not screen_v2:
-                continue
-            
-            edge_vec = screen_v2 - screen_v1
-            cursor_vec = Vector(mouse_coord) - screen_v1
-            t = max(0.0, min(1.0, cursor_vec.dot(edge_vec) / edge_vec.length_squared))
-            closest_point = screen_v1 + t * edge_vec
-            distance = (Vector(mouse_coord) - closest_point).length
-            
-            if distance < min_distance:
-                min_distance = distance
+            if distance_screen < min_distance:
+                min_distance = distance_screen
                 closest_edge = edge
-                best_t = t
+                best_t = t_3d
         
-        if closest_edge and min_distance <= 50:  # Допустимая дистанция в пикселях
+        if closest_edge and min_distance < 100:  # Порог в пикселях
             return closest_edge, best_t, min_distance
-        return None, 0.5, float('inf')
+        else:
+            return None, 0.5, float('inf')
     
     def execute(self, context):
         obj = context.active_object
         mouse_coord = getattr(self, 'mouse_coord', None)
         if not mouse_coord:
-            self.report({'WARNING'}, "Could not get cursor position")
+            self.report({'WARNING'}, "Не удалось определить позицию курсора")
             return {'CANCELLED'}
         
         bm = bmesh.from_edit_mesh(obj.data)
@@ -261,7 +226,6 @@ class MESH_OT_add_vertex_at_cursor(bpy.types.Operator):
         
         select_mode = context.tool_settings.mesh_select_mode
         is_edge_mode = select_mode[1]
-        is_vertex_mode = select_mode[0]
         
         target_edge = None
         t = 0.5
@@ -269,15 +233,14 @@ class MESH_OT_add_vertex_at_cursor(bpy.types.Operator):
         if is_edge_mode:
             selected_edges = [edge for edge in bm.edges if edge.select]
             if not selected_edges:
-                self.report({'ERROR'}, "No edge selected")
+                self.report({'ERROR'}, "Ребро не выбрано")
                 return {'CANCELLED'}
             if len(selected_edges) > 1:
-                self.report({'ERROR'}, "Select only one edge")
+                self.report({'ERROR'}, "Выберите только одно ребро")
                 return {'CANCELLED'}
             
             target_edge = selected_edges[0]
             
-            # Проецируем вершины ребра в экранное пространство
             region = context.region
             rv3d = context.region_data
             v1_world = obj.matrix_world @ target_edge.verts[0].co
@@ -289,40 +252,37 @@ class MESH_OT_add_vertex_at_cursor(bpy.types.Operator):
                 edge_vec = screen_v2 - screen_v1
                 edge_len_sq = edge_vec.length_squared
                 
-                if edge_len_sq > 1e-6:  # Проверка на ненулевую длину
+                if edge_len_sq > 1e-6:
                     cursor_vec = Vector(mouse_coord)
                     point_vec = cursor_vec - screen_v1
                     t = max(0.0, min(1.0, point_vec.dot(edge_vec) / edge_len_sq))
                     
-                    # Проверяем расстояние до ребра в экранном пространстве
                     closest_point = screen_v1 + t * edge_vec
                     cursor_distance = (cursor_vec - closest_point).length
                     if cursor_distance > 50:
                         t = 0.5
-                        self.report({'INFO'}, "Cursor far from edge - vertex added at center")
+                        self.report({'INFO'}, "Курсор далеко от ребра - вершина добавлена в центр")
                     else:
-                        t = max(0.05, min(0.95, t))  # Ограничиваем t как раньше
+                        t = max(0.05, min(0.95, t))
                 else:
                     t = 0.5
             else:
                 t = 0.5
-                
         else:
-            closest_edge, best_t, min_distance = self.find_closest_edge_to_cursor_knife_style(context, mouse_coord, bm, obj)
+            closest_edge, best_t, min_distance = self.find_closest_visible_edge_to_cursor(context, mouse_coord, bm, obj)
             if not closest_edge:
-                self.report({'ERROR'}, "No suitable edges found")
+                self.report({'ERROR'}, "Подходящее ребро не найдено")
                 return {'CANCELLED'}
-            if min_distance > 100:  # Увеличили толерантность для 3D расстояния
-                self.report({'WARNING'}, "Cursor too far from closest edge")
+            if min_distance > 100:
+                self.report({'WARNING'}, "Курсор слишком далеко от ближайшего ребра")
                 return {'CANCELLED'}
             target_edge = closest_edge
             t = best_t
         
         if not target_edge:
-            self.report({'ERROR'}, "Could not determine target edge")
+            selfmediator: self.report({'ERROR'}, "Не удалось определить целевое ребро")
             return {'CANCELLED'}
         
-        # Создаём новую вершину
         v1 = target_edge.verts[0].co
         v2 = target_edge.verts[1].co
         new_pos_local = v1 + t * (v2 - v1)
@@ -334,7 +294,6 @@ class MESH_OT_add_vertex_at_cursor(bpy.types.Operator):
         bm.faces.ensure_lookup_table()
         bm.normal_update()
         
-        # Очистка выделений
         for e in bm.edges:
             e.select = False
         for v in bm.verts:
@@ -342,8 +301,7 @@ class MESH_OT_add_vertex_at_cursor(bpy.types.Operator):
         for f in bm.faces:
             f.select = False
         
-        # Выделение в зависимости от режима
-        if is_vertex_mode:
+        if select_mode[0]:
             new_vert.select = True
         else:
             if new_vert.link_edges:
