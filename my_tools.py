@@ -12,6 +12,25 @@ bl_info = {
 import bpy
 import bmesh
 
+# Функция для получения и сохранения текущего режима выбора
+def get_current_select_mode(context):
+    """Получает текущий режим выбора в Edit Mode"""
+    if context.mode == 'EDIT_MESH':
+        tool_settings = context.tool_settings
+        mesh_select_mode = tool_settings.mesh_select_mode
+        if mesh_select_mode[0]:  # Vertex
+            return 'VERT'
+        elif mesh_select_mode[1]:  # Edge
+            return 'EDGE'
+        elif mesh_select_mode[2]:  # Face
+            return 'FACE'
+    return 'EDGE'  # По умолчанию
+
+def restore_select_mode(context, original_mode):
+    """Восстанавливает оригинальный режим выбора"""
+    if context.mode == 'EDIT_MESH':
+        bpy.ops.mesh.select_mode(type=original_mode)
+
 # Оператор: Выбор ребер с crease больше порога и установка их в 1
 class MESH_OT_select_crease_edges(bpy.types.Operator):
     bl_idname = "mesh.select_crease_edges"
@@ -33,6 +52,9 @@ class MESH_OT_select_crease_edges(bpy.types.Operator):
             self.report({'ERROR'}, "Активный объект не является мешем")
             return {'CANCELLED'}
 
+        # Сохраняем текущий режим выбора
+        original_mode = get_current_select_mode(context)
+
         if context.mode != 'EDIT_MESH':
             bpy.ops.object.mode_set(mode='EDIT')
 
@@ -49,6 +71,7 @@ class MESH_OT_select_crease_edges(bpy.types.Operator):
             self.report({'ERROR'}, "Слой данных для crease_edge не найден в BMesh")
             return {'CANCELLED'}
 
+        # Временно переключаемся на режим выбора ребер для операции
         bpy.ops.mesh.select_mode(type='EDGE')
         bpy.ops.mesh.select_all(action='DESELECT')
 
@@ -57,6 +80,10 @@ class MESH_OT_select_crease_edges(bpy.types.Operator):
                 edge.select = True
 
         bmesh.update_edit_mesh(mesh)
+        
+        # Восстанавливаем оригинальный режим выбора
+        restore_select_mode(context, original_mode)
+        
         return {'FINISHED'}
 
 # Оператор: Установка Crease в 1 для выделенных рёбер
@@ -72,6 +99,9 @@ class MESH_OT_set_crease_one(bpy.types.Operator):
             self.report({'ERROR'}, "Активный объект не является мешем")
             return {'CANCELLED'}
 
+        # Сохраняем текущий режим выбора
+        original_mode = get_current_select_mode(context)
+
         if context.mode != 'EDIT_MESH':
             bpy.ops.object.mode_set(mode='EDIT')
 
@@ -83,8 +113,6 @@ class MESH_OT_set_crease_one(bpy.types.Operator):
         if crease_layer is None:
             crease_layer = bm.edges.layers.float.new("crease_edge")
 
-        bpy.ops.mesh.select_mode(type='EDGE')
-        
         selected_count = 0
         for edge in bm.edges:
             if edge.select:
@@ -92,6 +120,10 @@ class MESH_OT_set_crease_one(bpy.types.Operator):
                 selected_count += 1
 
         bmesh.update_edit_mesh(mesh)
+        
+        # Восстанавливаем оригинальный режим выбора
+        restore_select_mode(context, original_mode)
+        
         return {'FINISHED'}
 
 # Оператор: Установка Crease в 0 для выделенных рёбер
@@ -107,6 +139,9 @@ class MESH_OT_set_crease_zero(bpy.types.Operator):
             self.report({'ERROR'}, "Активный объект не является мешем")
             return {'CANCELLED'}
 
+        # Сохраняем текущий режим выбора
+        original_mode = get_current_select_mode(context)
+
         if context.mode != 'EDIT_MESH':
             bpy.ops.object.mode_set(mode='EDIT')
 
@@ -118,8 +153,6 @@ class MESH_OT_set_crease_zero(bpy.types.Operator):
         if crease_layer is None:
             crease_layer = bm.edges.layers.float.new("crease_edge")
 
-        bpy.ops.mesh.select_mode(type='EDGE')
-        
         selected_count = 0
         for edge in bm.edges:
             if edge.select:
@@ -127,6 +160,10 @@ class MESH_OT_set_crease_zero(bpy.types.Operator):
                 selected_count += 1
 
         bmesh.update_edit_mesh(mesh)
+        
+        # Восстанавливаем оригинальный режим выбора
+        restore_select_mode(context, original_mode)
+        
         return {'FINISHED'}
 
 # Оператор: Установка Bevel Weight в 1 для выделенных рёбер
@@ -142,6 +179,9 @@ class MESH_OT_set_bevel_weight_one(bpy.types.Operator):
             self.report({'ERROR'}, "Активный объект не является мешем")
             return {'CANCELLED'}
 
+        # Сохраняем текущий режим выбора
+        original_mode = get_current_select_mode(context)
+
         if context.mode != 'EDIT_MESH':
             bpy.ops.object.mode_set(mode='EDIT')
 
@@ -153,8 +193,6 @@ class MESH_OT_set_bevel_weight_one(bpy.types.Operator):
         if bevel_weight_layer is None:
             bevel_weight_layer = bm.edges.layers.float.new("bevel_weight_edge")
 
-        bpy.ops.mesh.select_mode(type='EDGE')
-        
         selected_count = 0
         for edge in bm.edges:
             if edge.select:
@@ -162,6 +200,10 @@ class MESH_OT_set_bevel_weight_one(bpy.types.Operator):
                 selected_count += 1
 
         bmesh.update_edit_mesh(mesh)
+        
+        # Восстанавливаем оригинальный режим выбора
+        restore_select_mode(context, original_mode)
+        
         return {'FINISHED'}
 
 # Оператор: Установка Bevel Weight в 0 для выделенных рёбер
@@ -177,6 +219,9 @@ class MESH_OT_set_bevel_weight_zero(bpy.types.Operator):
             self.report({'ERROR'}, "Активный объект не является мешем")
             return {'CANCELLED'}
 
+        # Сохраняем текущий режим выбора
+        original_mode = get_current_select_mode(context)
+
         if context.mode != 'EDIT_MESH':
             bpy.ops.object.mode_set(mode='EDIT')
 
@@ -188,8 +233,6 @@ class MESH_OT_set_bevel_weight_zero(bpy.types.Operator):
         if bevel_weight_layer is None:
             bevel_weight_layer = bm.edges.layers.float.new("bevel_weight_edge")
 
-        bpy.ops.mesh.select_mode(type='EDGE')
-        
         selected_count = 0
         for edge in bm.edges:
             if edge.select:
@@ -197,6 +240,10 @@ class MESH_OT_set_bevel_weight_zero(bpy.types.Operator):
                 selected_count += 1
 
         bmesh.update_edit_mesh(mesh)
+        
+        # Восстанавливаем оригинальный режим выбора
+        restore_select_mode(context, original_mode)
+        
         return {'FINISHED'}
 
 # Оператор: Выбор рёбер с Bevel Weight больше 0
@@ -212,6 +259,9 @@ class MESH_OT_select_bevel_weight_edges(bpy.types.Operator):
             self.report({'ERROR'}, "Активный объект не является мешем")
             return {'CANCELLED'}
 
+        # Сохраняем текущий режим выбора
+        original_mode = get_current_select_mode(context)
+
         if context.mode != 'EDIT_MESH':
             bpy.ops.object.mode_set(mode='EDIT')
 
@@ -223,6 +273,7 @@ class MESH_OT_select_bevel_weight_edges(bpy.types.Operator):
             self.report({'WARNING'}, "Bevel Weight слой не найден")
             return {'CANCELLED'}
 
+        # Временно переключаемся на режим выбора ребер для операции
         bpy.ops.mesh.select_mode(type='EDGE')
         bpy.ops.mesh.select_all(action='DESELECT')
 
@@ -233,13 +284,110 @@ class MESH_OT_select_bevel_weight_edges(bpy.types.Operator):
                 selected_count += 1
 
         bmesh.update_edit_mesh(mesh)
+        
+        # Восстанавливаем оригинальный режим выбора
+        restore_select_mode(context, original_mode)
+        
         return {'FINISHED'}
 
 # Оператор: Выбор острых рёбер (Mark Sharp)
 class MESH_OT_select_sharp_edges(bpy.types.Operator):
     bl_idname = "mesh.select_sharp_edges"
     bl_label = "Select Sharp Edges"
-    bl_description = "Выбирает рёбра помеченные как Sharp (Mark Sharp)"
+    bl_description = "Выбирает рёбра помеченные как Sharp (Mark Sharp). С зажатым Shift - выбор по углу"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    # Свойство для угла при выборе по углу
+    angle: bpy.props.FloatProperty(
+        name="Angle",
+        description="Максимальный угол между гранями для выбора ребра",
+        default=0.523599,  # 30 градусов в радианах
+        min=0.0,
+        max=3.14159,  # 180 градусов в радианах
+        step=1,
+        precision=3,
+        subtype='ANGLE',
+        options={'SKIP_SAVE'}  # Не сохраняем в blend файл и не показываем когда не нужно
+    )
+
+    # Внутреннее свойство для определения режима
+    _select_by_angle: bpy.props.BoolProperty(default=False, options={'HIDDEN', 'SKIP_SAVE'})
+
+    def execute(self, context):
+        obj = context.active_object
+        if obj is None or obj.type != 'MESH':
+            self.report({'ERROR'}, "Активный объект не является мешем")
+            return {'CANCELLED'}
+
+        # Сохраняем текущий режим выбора
+        original_mode = get_current_select_mode(context)
+
+        if context.mode != 'EDIT_MESH':
+            bpy.ops.object.mode_set(mode='EDIT')
+
+        # Временно переключаемся на режим выбора ребер для операции
+        bpy.ops.mesh.select_mode(type='EDGE')
+        bpy.ops.mesh.select_all(action='DESELECT')
+
+        mesh = obj.data
+        bm = bmesh.from_edit_mesh(mesh)
+
+        if self._select_by_angle:
+            # Выбираем рёбра по углу между гранями
+            import mathutils
+            selected_count = 0
+            
+            for edge in bm.edges:
+                if len(edge.link_faces) == 2:  # Только рёбра между двумя гранями
+                    face1 = edge.link_faces[0]
+                    face2 = edge.link_faces[1]
+                    angle = face1.normal.angle(face2.normal)
+                    
+                    if angle > self.angle:
+                        edge.select = True
+                        selected_count += 1
+        else:
+            # Выбираем рёбра с пометкой Mark Sharp
+            selected_count = 0
+            for edge in bm.edges:
+                if not edge.smooth:  # edge.smooth = False означает Sharp
+                    edge.select = True
+                    selected_count += 1
+
+        bmesh.update_edit_mesh(mesh)
+        
+        # Восстанавливаем оригинальный режим выбора
+        restore_select_mode(context, original_mode)
+        
+        return {'FINISHED'}
+
+    def draw(self, context):
+        # Показываем настройку угла только при выборе по углу
+        if self._select_by_angle:
+            layout = self.layout
+            layout.prop(self, "angle")
+
+    @classmethod
+    def poll(cls, context):
+        return context.active_object and context.active_object.type == 'MESH'
+
+    def invoke(self, context, event):
+        # Проверяем, зажат ли Shift
+        if event.shift:
+            # Устанавливаем режим выбора по углу
+            self._select_by_angle = True
+            # Выполняем операцию сразу, панель настроек появится автоматически снизу слева
+            return self.execute(context)
+        else:
+            # Выполняем обычную логику (выбор помеченных как Sharp)
+            self._select_by_angle = False
+            return self.execute(context)
+
+# Оператор: Mark Sharp для выделенных рёбер
+class MESH_OT_mark_sharp(bpy.types.Operator):
+    bl_idname = "mesh.mark_sharp_custom"
+    bl_label = "Mark Sharp"
+    bl_description = "Помечает выделенные рёбра как Sharp"
     bl_options = {'REGISTER', 'UNDO'}
 
     def execute(self, context):
@@ -248,22 +396,131 @@ class MESH_OT_select_sharp_edges(bpy.types.Operator):
             self.report({'ERROR'}, "Активный объект не является мешем")
             return {'CANCELLED'}
 
+        # Сохраняем текущий режим выбора
+        original_mode = get_current_select_mode(context)
+
         if context.mode != 'EDIT_MESH':
             bpy.ops.object.mode_set(mode='EDIT')
 
         mesh = obj.data
         bm = bmesh.from_edit_mesh(mesh)
 
-        bpy.ops.mesh.select_mode(type='EDGE')
-        bpy.ops.mesh.select_all(action='DESELECT')
-
         selected_count = 0
         for edge in bm.edges:
-            if not edge.smooth:  # edge.smooth = False означает Sharp
-                edge.select = True
+            if edge.select:
+                edge.smooth = False  # False = Sharp
                 selected_count += 1
 
         bmesh.update_edit_mesh(mesh)
+        
+        # Восстанавливаем оригинальный режим выбора
+        restore_select_mode(context, original_mode)
+        
+        return {'FINISHED'}
+
+# Оператор: Clear Sharp для выделенных рёбер
+class MESH_OT_clear_sharp(bpy.types.Operator):
+    bl_idname = "mesh.clear_sharp_custom"
+    bl_label = "Clear Sharp"
+    bl_description = "Убирает пометку Sharp с выделенных рёбер"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        obj = context.active_object
+        if obj is None or obj.type != 'MESH':
+            self.report({'ERROR'}, "Активный объект не является мешем")
+            return {'CANCELLED'}
+
+        # Сохраняем текущий режим выбора
+        original_mode = get_current_select_mode(context)
+
+        if context.mode != 'EDIT_MESH':
+            bpy.ops.object.mode_set(mode='EDIT')
+
+        mesh = obj.data
+        bm = bmesh.from_edit_mesh(mesh)
+
+        selected_count = 0
+        for edge in bm.edges:
+            if edge.select:
+                edge.smooth = True  # True = Smooth (не Sharp)
+                selected_count += 1
+
+        bmesh.update_edit_mesh(mesh)
+        
+        # Восстанавливаем оригинальный режим выбора
+        restore_select_mode(context, original_mode)
+        
+        return {'FINISHED'}
+
+# Оператор: Mark Seam для выделенных рёбер
+class MESH_OT_mark_seam(bpy.types.Operator):
+    bl_idname = "mesh.mark_seam_custom"
+    bl_label = "Mark Seam"
+    bl_description = "Помечает выделенные рёбра как Seam"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        obj = context.active_object
+        if obj is None or obj.type != 'MESH':
+            self.report({'ERROR'}, "Активный объект не является мешем")
+            return {'CANCELLED'}
+
+        # Сохраняем текущий режим выбора
+        original_mode = get_current_select_mode(context)
+
+        if context.mode != 'EDIT_MESH':
+            bpy.ops.object.mode_set(mode='EDIT')
+
+        mesh = obj.data
+        bm = bmesh.from_edit_mesh(mesh)
+
+        selected_count = 0
+        for edge in bm.edges:
+            if edge.select:
+                edge.seam = True
+                selected_count += 1
+
+        bmesh.update_edit_mesh(mesh)
+        
+        # Восстанавливаем оригинальный режим выбора
+        restore_select_mode(context, original_mode)
+        
+        return {'FINISHED'}
+
+# Оператор: Clear Seam для выделенных рёбер
+class MESH_OT_clear_seam(bpy.types.Operator):
+    bl_idname = "mesh.clear_seam_custom"
+    bl_label = "Clear Seam"
+    bl_description = "Убирает пометку Seam с выделенных рёбер"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        obj = context.active_object
+        if obj is None or obj.type != 'MESH':
+            self.report({'ERROR'}, "Активный объект не является мешем")
+            return {'CANCELLED'}
+
+        # Сохраняем текущий режим выбора
+        original_mode = get_current_select_mode(context)
+
+        if context.mode != 'EDIT_MESH':
+            bpy.ops.object.mode_set(mode='EDIT')
+
+        mesh = obj.data
+        bm = bmesh.from_edit_mesh(mesh)
+
+        selected_count = 0
+        for edge in bm.edges:
+            if edge.select:
+                edge.seam = False
+                selected_count += 1
+
+        bmesh.update_edit_mesh(mesh)
+        
+        # Восстанавливаем оригинальный режим выбора
+        restore_select_mode(context, original_mode)
+        
         return {'FINISHED'}
 
 # Оператор: Выбор объектов с неравномерным масштабом
@@ -376,8 +633,21 @@ class VIEW3D_PT_my_tools_panel(bpy.types.Panel):
         if context.scene.select_tools_expanded:
             box.operator("mesh.select_crease_edges", text="Crease Edges")
             box.operator("mesh.select_bevel_weight_edges", text="Bevel Weight Edges")
-            box.operator("mesh.select_sharp_edges", text="Marked Sharp Edges")
+            box.operator("mesh.select_sharp_edges", text="Marked Sharp or Angle")
             box.operator("object.select_non_uniform_scale", text="Scaled Objects")
+            
+            # Небольшой отступ перед новыми кнопками
+            box.separator(factor=0.5)
+            
+            # Новые кнопки Mark Sharp - Clear Sharp
+            row = box.row(align=True)
+            row.operator("mesh.mark_sharp_custom", text="Mark Sharp")
+            row.operator("mesh.clear_sharp_custom", text="Clear Sharp")
+            
+            # Новые кнопки Mark Seam - Clear Seam
+            row = box.row(align=True)
+            row.operator("mesh.mark_seam_custom", text="Mark Seam")
+            row.operator("mesh.clear_seam_custom", text="Clear Seam")
         
         # Length Settings аккордеон
         box = layout.box()
@@ -418,6 +688,10 @@ classes = (
     MESH_OT_set_bevel_weight_zero,
     MESH_OT_select_bevel_weight_edges,
     MESH_OT_select_sharp_edges,
+    MESH_OT_mark_sharp,
+    MESH_OT_clear_sharp,
+    MESH_OT_mark_seam,
+    MESH_OT_clear_seam,
     OBJECT_OT_select_non_uniform_scale,
     UV_OT_straight_uv_island,
     VIEW3D_PT_my_tools_panel,

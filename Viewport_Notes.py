@@ -1,6 +1,6 @@
 bl_info = {
     "name": "Viewport Notes",
-    "author": "eRisonv",
+    "author": "Gwyn",
     "version": (1, 2),
     "blender": (2, 80, 0),
     "location": "View3D > Viewport Overlays, Shortcut: Ctrl+Q",
@@ -12,8 +12,10 @@ import bpy
 import blf
 import json
 import os
+import gpu
+from gpu_extras.batch import batch_for_shader
 from bpy.types import (Panel, AddonPreferences, PropertyGroup, Operator)
-from bpy.props import (StringProperty, FloatProperty, EnumProperty, CollectionProperty, BoolProperty, PointerProperty)
+from bpy.props import (StringProperty, FloatProperty, EnumProperty, CollectionProperty, BoolProperty, PointerProperty, FloatVectorProperty)
 
 # Глобальный словарь для хранения состояния видимости по областям
 viewport_notes_show_per_area = {}
@@ -37,7 +39,12 @@ def save_settings():
             'modeling_expanded': prefs.modeling_expanded,
             'sculpt_expanded': prefs.sculpt_expanded,
             'use_hotkey': prefs.use_hotkey,
-            'hide_scale_on_hotkey': prefs.hide_scale_on_hotkey
+            'hide_scale_on_hotkey': prefs.hide_scale_on_hotkey,
+            'warning_color': list(prefs.warning_color),
+            'scale_position': prefs.scale_position,
+            'scale_vertical_offset': prefs.scale_vertical_offset,
+            'scale_horizontal_offset': prefs.scale_horizontal_offset,
+            'horizontal_scale': prefs.horizontal_scale
         }
         
         settings_path = get_settings_path()
@@ -270,6 +277,43 @@ class ViewportNotesPreferences(AddonPreferences):
         default=False,
         update=lambda self, context: save_settings()
     )
+    
+    warning_color: FloatVectorProperty(
+        name="Scale Warning Color",
+        description="Color for displaying scale values when they are not equal to 1.0",
+        subtype='COLOR',
+        default=(1.0, 0.0, 0.0),
+        min=0.0,
+        max=1.0,
+        update=lambda self, context: save_settings()
+    )
+    
+    scale_vertical_offset: FloatProperty(
+        name="Vertical Offset",
+        description="Vertical offset for scale display",
+        default=0.0,
+        min=-1000.0,
+        max=1000.0,
+        subtype='PIXEL',
+        update=lambda self, context: save_settings()
+    )
+    
+    scale_horizontal_offset: FloatProperty(
+        name="Horizontal Offset",
+        description="Horizontal offset for scale display",
+        default=0.0,
+        min=-1000.0,
+        max=1000.0,
+        subtype='PIXEL',
+        update=lambda self, context: save_settings()
+    )
+
+    horizontal_scale: BoolProperty(
+        name="Horizontal Scale",
+        description="Display scale values horizontally (X: 0.500 Y: 0.500 Z: 0.500) instead of vertically",
+        default=False,
+        update=lambda self, context: save_settings()
+    )
 
     def draw(self, context):
         layout = self.layout
@@ -364,6 +408,10 @@ class ViewportNotesPreferences(AddonPreferences):
         layout.separator()
         layout.label(text="Scale options:")
         layout.prop(self, "scale_position")
+        layout.prop(self, "warning_color")
+        layout.prop(self, "scale_vertical_offset")
+        layout.prop(self, "scale_horizontal_offset")
+        layout.prop(self, "horizontal_scale")
 
 def get_position_coordinates(context, position):
     area_width = context.area.width
@@ -379,7 +427,7 @@ def get_position_coordinates(context, position):
     
     return positions.get(position)
 
-def draw_outlined_text(font_id, text, x, y, size, opacity, outline_width=1):
+def draw_outlined_text(font_id, text, x, y, size, opacity, outline_width=1, color=(1, 1, 1)):
     blf.size(font_id, size)
     blf.color(font_id, 0, 0, 0, opacity)
     offsets = [
@@ -392,9 +440,30 @@ def draw_outlined_text(font_id, text, x, y, size, opacity, outline_width=1):
         blf.position(font_id, x + offset_x, y + offset_y, 0)
         blf.draw(font_id, text)
     
-    blf.color(font_id, 1, 1, 1, opacity)
+    blf.color(font_id, color[0], color[1], color[2], opacity)
     blf.position(font_id, x, y, 0)
     blf.draw(font_id, text)
+
+def draw_rounded_rect(x, y, width, height, color, opacity):
+    try:
+        # Enable alpha blending for proper transparency
+        gpu.state.blend_set('ALPHA')
+        shader = gpu.shader.from_builtin('UNIFORM_COLOR')
+        vertices = [
+            (x, y), (x + width, y),
+            (x + width, y + height), (x, y + height)
+        ]
+        indices = [(0, 1, 2), (2, 3, 0)]
+        batch = batch_for_shader(shader, 'TRIS', {"pos": vertices}, indices=indices)
+        shader.bind()
+        shader.uniform_float("color", (*color, opacity * 0.5))  # Restored original dark gray
+        batch.draw(shader)
+        # Reset blend mode
+        gpu.state.blend_set('NONE')
+        return True
+    except Exception as e:
+        print(f"Error drawing rounded rect: {e}")
+        return False
 
 def draw_notes_info():
     area = bpy.context.area
@@ -427,15 +496,12 @@ def draw_scale_info(context):
     prefs = context.preferences.addons[__name__].preferences
     area = context.area
     
-    # Не показывать масштаб если кнопка отключена через горячую клавишу
     if prefs.hide_scale_on_hotkey and not viewport_notes_show_per_area.get(area, True):
         return
 
-    # Не показывать масштаб, если отключена опция
     if not prefs.show_scale:
         return
         
-    # Добавляем проверку на режим Sculpt и не показываем Scale в этом режиме
     current_mode = context.mode
     if current_mode == 'SCULPT':
         return
@@ -448,23 +514,61 @@ def draw_scale_info(context):
     scale_y = round(obj.scale.y, 3)
     scale_z = round(obj.scale.z, 3)
 
+    scale_not_one = (scale_x != 1.0 or scale_y != 1.0 or scale_z != 1.0)
+    
+    if scale_not_one:
+        text_color = prefs.warning_color
+    else:
+        text_color = (1, 1, 1)
+
     font_id = 0
     font_size = int(16 * prefs.scale)
     opacity = prefs.opacity
     line_height = int(21 * prefs.scale)
 
     x, base_y = get_position_coordinates(context, prefs.scale_position)
+    x += prefs.scale_horizontal_offset
+    base_y += prefs.scale_vertical_offset
 
-    texts = [
-        "Scale:",
-        f"X: {scale_x}",
-        f"Y: {scale_y}",
-        f"Z: {scale_z}"
-    ]
+    if prefs.horizontal_scale:
+        # Horizontal scale display with individual frames
+        texts = [f"X: {scale_x}", f"Y: {scale_y}", f"Z: {scale_z}"]
+        current_x = x
+        blf.size(font_id, font_size)
+        
+        # Draw "Scale:" first
+        scale_text = ""
+        draw_outlined_text(font_id, scale_text, current_x, base_y, font_size, opacity, color=text_color)
+        current_x += blf.dimensions(font_id, scale_text)[0] + 10 * prefs.scale
 
-    for i, text in enumerate(texts):
-        y = base_y - (i * line_height) if prefs.scale_position in ['TOP_LEFT', 'TOP_RIGHT'] else base_y + ((len(texts) - 1 - i) * line_height)
-        draw_outlined_text(font_id, text, x, y, font_size, opacity)
+        # Draw each axis value with a background frame
+        for text in texts:
+            text_width, text_height = blf.dimensions(font_id, text)
+            if text_width <= 0 or text_height <= 0:
+                continue
+            padding = 5 * prefs.scale
+            frame_width = text_width + 2 * padding
+            frame_height = text_height + 2 * padding
+            frame_y = base_y - padding - text_height
+            
+            # Draw background frame
+            if not draw_rounded_rect(current_x - padding, frame_y, frame_width, frame_height, (0.2, 0.2, 0.2), opacity):
+                print(f"Fallback: Drawing {text} without frame due to GPU error")
+            
+            # Draw text
+            draw_outlined_text(font_id, text, current_x, base_y - text_height, font_size, opacity, color=text_color)
+            current_x += frame_width + 10 * prefs.scale
+    else:
+        # Vertical scale display
+        texts = [
+            "",
+            f"X: {scale_x}",
+            f"Y: {scale_y}",
+            f"Z: {scale_z}"
+        ]
+        for i, text in enumerate(texts):
+            y = base_y - (i * line_height) if prefs.scale_position in ['TOP_LEFT', 'TOP_RIGHT'] else base_y + ((len(texts) - 1 - i) * line_height)
+            draw_outlined_text(font_id, text, x, y, font_size, opacity, color=text_color)
 
 def draw_callback_px():
     draw_notes_info()
@@ -601,6 +705,11 @@ def register():
             prefs.sculpt_expanded = settings.get('sculpt_expanded', True)
             prefs.use_hotkey = settings.get('use_hotkey', True)
             prefs.hide_scale_on_hotkey = settings.get('hide_scale_on_hotkey', False)
+            prefs.warning_color = settings.get('warning_color', [1.0, 0.0, 0.0])
+            prefs.scale_position = settings.get('scale_position', 'BOTTOM_LEFT')
+            prefs.scale_vertical_offset = settings.get('scale_vertical_offset', 0.0)
+            prefs.scale_horizontal_offset = settings.get('scale_horizontal_offset', 0.0)
+            prefs.horizontal_scale = settings.get('horizontal_scale', False)
             bpy.context.window_manager.viewport_notes_show = settings.get('show_notes', True)
         except Exception as e:
             print(f"Error loading settings: {e}")
