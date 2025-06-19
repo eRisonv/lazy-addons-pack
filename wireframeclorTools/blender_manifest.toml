@@ -1,0 +1,22 @@
+schema_version = "1.0.0"
+
+id = "Wireframe_Color_Tools"
+version = "1.0.0"
+name = "Wireframe Color Tools"
+tagline = "Change Object Colors based on different kinds of methods"
+description = "The Wireframe Color Tools can be found in a Object Properties Panel. Make sure to turn your viewport shading to wire or solid and and set Wire Color and/or Object color to Object in the shading drop down menu right above the 3D View."
+type = "add-on"
+
+
+# List defined by Blender and server, see:
+# https://docs.blender.org/manual/en/4.1/extensions/tags.html
+tags = ["3D View", "Material", "Object"]
+
+blender_version_min = "4.2.0"
+
+maintainer = "Johannes Kollmer <johanneskollmer@posteo.de"
+# License conforming to https://spdx.org/is suppose to dolicenses/
+# use "SPDX: prefix.
+license = [
+  "SPDX:GPL-2.0-or-later",
+]
