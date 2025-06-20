@@ -467,7 +467,8 @@ def draw_rounded_rect(x, y, width, height, color, opacity):
 
 def draw_notes_info():
     area = bpy.context.area
-    if not viewport_notes_show_per_area.get(area, True):
+    # ИЗМЕНИТЬ: по умолчанию False вместо True
+    if not viewport_notes_show_per_area.get(area, False):
         return
         
     prefs = bpy.context.preferences.addons[__name__].preferences
@@ -496,7 +497,8 @@ def draw_scale_info(context):
     prefs = context.preferences.addons[__name__].preferences
     area = context.area
     
-    if prefs.hide_scale_on_hotkey and not viewport_notes_show_per_area.get(area, True):
+    # ИЗМЕНИТЬ: по умолчанию False вместо True
+    if prefs.hide_scale_on_hotkey and not viewport_notes_show_per_area.get(area, False):
         return
 
     if not prefs.show_scale:
@@ -579,7 +581,8 @@ class VIEWPORT_NOTES_OT_toggle_from_statusbar(Operator):
     def execute(self, context):
         # Переключаем глобальное состояние заметок для всех областей
         wm = context.window_manager
-        current_state = getattr(wm, 'viewport_notes_show', True)
+        # ИЗМЕНИТЬ: по умолчанию False вместо True
+        current_state = getattr(wm, 'viewport_notes_show', False)
         wm.viewport_notes_show = not current_state
         
         # Обновляем состояние для всех областей 3D View
@@ -597,7 +600,8 @@ def draw_notes_status_bar_button(self, context):
     
     # Получаем текущее состояние заметок
     wm = context.window_manager
-    notes_visible = getattr(wm, 'viewport_notes_show', True)
+    # ИЗМЕНИТЬ: по умолчанию False вместо True
+    notes_visible = getattr(wm, 'viewport_notes_show', False)
     
     # Определяем иконку в зависимости от состояния
     icon = 'HIDE_OFF' if notes_visible else 'HIDE_ON'
@@ -640,7 +644,8 @@ class ToggleNotesVisibilityOperator(Operator):
 
     def execute(self, context):
         area = context.area
-        current_state = viewport_notes_show_per_area.get(area, True)
+        # ИЗМЕНИТЬ: по умолчанию False вместо True
+        current_state = viewport_notes_show_per_area.get(area, False)
         viewport_notes_show_per_area[area] = not current_state
         context.area.tag_redraw()
         return {'FINISHED'}
@@ -713,17 +718,17 @@ def register():
     for cls in classes:
         bpy.utils.register_class(cls)
     
+    # ИЗМЕНИТЬ: default=False вместо True
     bpy.types.WindowManager.viewport_notes_show = bpy.props.BoolProperty(
-        default=True,
+        default=False,
         update=lambda self, context: save_settings()
     )
     
     bpy.app.handlers.depsgraph_update_post.append(check_mode_change)
     
-    # ДОБАВИТЬ КНОПКУ В STATUS BAR
+    # Добавить кнопку в STATUS BAR
     bpy.types.STATUSBAR_HT_header.append(draw_notes_status_bar_button)
     
-    # Остальной код загрузки настроек остается без изменений...
     settings = load_settings()
     if settings:
         try:
@@ -750,7 +755,8 @@ def register():
             prefs.scale_vertical_offset = settings.get('scale_vertical_offset', 0.0)
             prefs.scale_horizontal_offset = settings.get('scale_horizontal_offset', 0.0)
             prefs.horizontal_scale = settings.get('horizontal_scale', False)
-            bpy.context.window_manager.viewport_notes_show = settings.get('show_notes', True)
+            # ИЗМЕНИТЬ: по умолчанию False вместо True
+            bpy.context.window_manager.viewport_notes_show = settings.get('show_notes', False)
         except Exception as e:
             print(f"Error loading settings: {e}")
     
