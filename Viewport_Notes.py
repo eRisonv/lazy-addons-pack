@@ -569,6 +569,41 @@ def draw_scale_info(context):
         for i, text in enumerate(texts):
             y = base_y - (i * line_height) if prefs.scale_position in ['TOP_LEFT', 'TOP_RIGHT'] else base_y + ((len(texts) - 1 - i) * line_height)
             draw_outlined_text(font_id, text, x, y, font_size, opacity, color=text_color)
+            
+class VIEWPORT_NOTES_OT_toggle_from_statusbar(Operator):
+    bl_idname = "viewport_notes.toggle_from_statusbar"
+    bl_label = "Toggle Notes"
+    bl_description = "Toggle viewport notes visibility"
+    bl_options = {'REGISTER'}
+
+    def execute(self, context):
+        # Переключаем глобальное состояние заметок для всех областей
+        wm = context.window_manager
+        current_state = getattr(wm, 'viewport_notes_show', True)
+        wm.viewport_notes_show = not current_state
+        
+        # Обновляем состояние для всех областей 3D View
+        for window in context.window_manager.windows:
+            for area in window.screen.areas:
+                if area.type == 'VIEW_3D':
+                    viewport_notes_show_per_area[area] = wm.viewport_notes_show
+                    area.tag_redraw()
+        
+        return {'FINISHED'}
+
+def draw_notes_status_bar_button(self, context):
+    """Draw the Notes button in the Status Bar next to New Project."""
+    layout = self.layout
+    
+    # Получаем текущее состояние заметок
+    wm = context.window_manager
+    notes_visible = getattr(wm, 'viewport_notes_show', True)
+    
+    # Определяем иконку в зависимости от состояния
+    icon = 'HIDE_OFF' if notes_visible else 'HIDE_ON'
+    
+    # Добавляем кнопку
+    op = layout.operator("viewport_notes.toggle_from_statusbar", text="Notes", icon=icon)
 
 def draw_callback_px():
     draw_notes_info()
@@ -671,6 +706,7 @@ classes = [
     ViewportNotesPreferences,
     VIEW3D_PT_viewport_notes,
     ToggleNotesVisibilityOperator,
+    VIEWPORT_NOTES_OT_toggle_from_statusbar,  # ДОБАВИТЬ ЭТУ СТРОКУ
 ]
 
 def register():
@@ -684,6 +720,10 @@ def register():
     
     bpy.app.handlers.depsgraph_update_post.append(check_mode_change)
     
+    # ДОБАВИТЬ КНОПКУ В STATUS BAR
+    bpy.types.STATUSBAR_HT_header.append(draw_notes_status_bar_button)
+    
+    # Остальной код загрузки настроек остается без изменений...
     settings = load_settings()
     if settings:
         try:
@@ -723,12 +763,13 @@ def unregister():
         bpy.app.handlers.depsgraph_update_post.remove(check_mode_change)
     save_settings()
     unregister_keymap()
+    
+    # УБРАТЬ КНОПКУ ИЗ STATUS BAR
+    bpy.types.STATUSBAR_HT_header.remove(draw_notes_status_bar_button)
+    
     del bpy.types.WindowManager.viewport_notes_show
     for cls in reversed(classes):
         try:
             bpy.utils.unregister_class(cls)
         except RuntimeError:
             pass
-
-if __name__ == "__main__":
-    register()
