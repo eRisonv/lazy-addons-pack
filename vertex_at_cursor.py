@@ -2,7 +2,7 @@ bl_info = {
     "name": "Add Vertex at Cursor",
     "author": "eRisonv",
     "version": (1, 4),
-    "blender": (2, 80, 0),
+    "blender": (4, 00, 0),
     "location": "Edit Mode > Right Click > Add Vertex at Mouse / Connect Selected Vertex at Cursor",
     "description": "Adds vertex on selected/closest edge to cursor with precise positioning",
     "category": "Mesh",
@@ -10,7 +10,7 @@ bl_info = {
 
 import bpy
 import bmesh
-from mathutils import Vector
+from mathutils import Vector, Matrix
 import mathutils
 from bpy_extras import view3d_utils
 import gpu
@@ -268,7 +268,7 @@ class MESH_OT_add_vertex_at_cursor(bpy.types.Operator):
         return self.execute(context)
 
 class MESH_OT_connect_selected_vertex_at_cursor(bpy.types.Operator):
-    """Add vertex on selected edge or closest to cursor edge and connect to selected vertices"""
+    """Add vertex on selected edge or closest to cursor edge and connect to selected vertices, or connect to vertex under cursor"""
     bl_idname = "mesh.connect_selected_vertex_at_cursor"
     bl_label = "Connect Selected Vertex at Cursor"
     bl_options = {'REGISTER', 'UNDO'}
@@ -317,8 +317,82 @@ class MESH_OT_connect_selected_vertex_at_cursor(bpy.types.Operator):
         distance = (point_on_ray - point_on_line).length
         
         return distance, t_line, point_on_line
+    
+    def is_vertex_visible(self, context, vert, obj, bm):
+        """Проверяет, видима ли вершина"""
+        region = context.region
+        rv3d = context.region_data
+        vert_world = obj.matrix_world @ vert.co
+        ray_origin = view3d_utils.region_2d_to_origin_3d(region, rv3d, (region.width/2, region.height/2))
+        ray_direction = (vert_world - ray_origin).normalized()
+        distance = (vert_world - ray_origin).length
+        success, hit_location, _, _ = obj.ray_cast(ray_origin, ray_direction, distance=distance)
+        if not success:
+            return True
+        distance_to_hit = (hit_location - ray_origin).length
+        return distance_to_hit >= distance - 0.001
+    
+    def find_vertex_under_cursor(self, context, mouse_coord, bm, obj, tolerance=35):
+        """Находит вершину под курсором, включая зеркальные вершины от модификатора Mirror"""
+        region = context.region
+        rv3d = context.region_data
+        camera_pos = view3d_utils.region_2d_to_origin_3d(region, rv3d, (region.width/2, region.height/2))
+        
+        closest_vertex = None
+        min_distance = float('inf')
+        
+        # Получаем ось отражения, если есть модификатор Mirror
+        mirror_axis = self.get_mirror_axis(obj)
+        
+        for vert in bm.verts:
+            if not self.is_vertex_visible(context, vert, obj, bm):
+                continue
+            
+            # Проверяем оригинальную вершину
+            vert_world = obj.matrix_world @ vert.co
+            screen_coord = view3d_utils.location_3d_to_region_2d(region, rv3d, vert_world)
+            
+            if screen_coord:
+                screen_dist = (Vector(mouse_coord) - screen_coord).length
+                if screen_dist < tolerance and screen_dist < min_distance:
+                    is_front_vertex = False
+                    for face in vert.link_faces:
+                        normal_world = (obj.matrix_world.to_3x3() @ face.normal).normalized()
+                        face_center_world = obj.matrix_world @ face.calc_center_median()
+                        view_dir = (camera_pos - face_center_world).normalized()
+                        if normal_world.dot(view_dir) > 0:
+                            is_front_vertex = True
+                            break
+                    if is_front_vertex:
+                        min_distance = screen_dist
+                        closest_vertex = vert
+            
+            # Проверяем зеркальную вершину, если есть модификатор Mirror
+            if mirror_axis is not None:
+                vert_mirrored = self.reflect(vert.co, mirror_axis)
+                vert_mirrored_world = obj.matrix_world @ vert_mirrored
+                screen_coord_mirrored = view3d_utils.location_3d_to_region_2d(region, rv3d, vert_mirrored_world)
+                
+                if screen_coord_mirrored:
+                    screen_dist_mirrored = (Vector(mouse_coord) - screen_coord_mirrored).length
+                    if screen_dist_mirrored < tolerance and screen_dist_mirrored < min_distance:
+                        # Используем оригинальную вершину, если курсор над зеркальной
+                        is_front_vertex = False
+                        for face in vert.link_faces:
+                            normal_world = (obj.matrix_world.to_3x3() @ face.normal).normalized()
+                            face_center_world = obj.matrix_world @ face.calc_center_median()
+                            view_dir = (camera_pos - face_center_world).normalized()
+                            if normal_world.dot(view_dir) > 0:
+                                is_front_vertex = True
+                                break
+                        if is_front_vertex:
+                            min_distance = screen_dist_mirrored
+                            closest_vertex = vert
+        
+        return closest_vertex, min_distance
 
     def get_mirror_axis(self, obj):
+        """Получает ось отражения для модификатора Mirror"""
         mirror_mod = next((mod for mod in obj.modifiers if mod.type == 'MIRROR'), None)
         if mirror_mod:
             for axis in range(3):
@@ -327,11 +401,13 @@ class MESH_OT_connect_selected_vertex_at_cursor(bpy.types.Operator):
         return None
 
     def reflect(self, co, axis):
+        """Отражает координаты по указанной оси"""
         co_reflected = co.copy()
         co_reflected[axis] = -co_reflected[axis]
         return co_reflected
 
     def find_closest_edge_to_cursor_knife_style(self, context, mouse_coord, bm, obj):
+        """Находит ближайшее ребро к курсору, учитывая модификатор Mirror"""
         region = context.region
         rv3d = context.region_data
         
@@ -344,13 +420,14 @@ class MESH_OT_connect_selected_vertex_at_cursor(bpy.types.Operator):
         min_distance = float('inf')
         best_t = 0.5
         
+        cursor_vec = Vector(mouse_coord)
+        
         for edge in bm.edges:
             v1_world = obj.matrix_world @ edge.verts[0].co
             v2_world = obj.matrix_world @ edge.verts[1].co
             distance_3d, t_3d, point_on_line = self.ray_to_line_closest_points(ray_origin, ray_direction, v1_world, v2_world)
             screen_point = view3d_utils.location_3d_to_region_2d(region, rv3d, point_on_line)
             if screen_point:
-                cursor_vec = Vector(mouse_coord)
                 distance_screen = (cursor_vec - screen_point).length
             else:
                 distance_screen = float('inf')
@@ -399,6 +476,119 @@ class MESH_OT_connect_selected_vertex_at_cursor(bpy.types.Operator):
         
         selected_vertices = [v for v in bm.verts if v.select]
         
+        # Проверяем, есть ли вершина под курсором
+        vertex_under_cursor, cursor_distance = self.find_vertex_under_cursor(context, mouse_coord, bm, obj, tolerance=35)
+        if not vertex_under_cursor:
+            vertex_under_cursor, cursor_distance = self.find_vertex_under_cursor(context, mouse_coord, bm, obj, tolerance=20)
+        
+        # Если выбрано 2+ вершин и под курсором есть вершина
+        if len(selected_vertices) >= 2 and vertex_under_cursor:
+            connections_created = 0
+            
+            for selected_vert in selected_vertices:
+                if selected_vert == vertex_under_cursor:
+                    continue
+                
+                edge_exists = False
+                for edge in selected_vert.link_edges:
+                    if vertex_under_cursor in edge.verts:
+                        edge_exists = True
+                        break
+                
+                if not edge_exists:
+                    try:
+                        result = bmesh.ops.connect_vert_pair(bm, verts=[selected_vert, vertex_under_cursor])
+                        if result.get('edges'):
+                            connections_created += 1
+                    except:
+                        try:
+                            result = bmesh.ops.connect_verts(bm, verts=[selected_vert, vertex_under_cursor])
+                            if result.get('edges'):
+                                connections_created += 1
+                        except:
+                            try:
+                                new_edge = bm.edges.new([selected_vert, vertex_under_cursor])
+                                connections_created += 1
+                            except ValueError:
+                                pass
+            
+            bm.edges.ensure_lookup_table()
+            bm.verts.ensure_lookup_table()
+            bm.faces.ensure_lookup_table()
+            bm.normal_update()
+            
+            for e in bm.edges:
+                e.select = False
+            for v in bm.verts:
+                v.select = False
+            for f in bm.faces:
+                f.select = False
+            
+            vertex_under_cursor.select = True
+            bm.select_history.clear()
+            bm.select_history.add(vertex_under_cursor)
+            
+            bmesh.update_edit_mesh(obj.data, loop_triangles=True, destructive=True)
+            for area in context.screen.areas:
+                if area.type == 'VIEW_3D':
+                    area.tag_redraw()
+            
+            if connections_created == 0:
+                self.report({'WARNING'}, "Не удалось создать новые соединения")
+            
+            return {'FINISHED'}
+        
+        # Если выбрана 1 вершина и под курсором другая вершина
+        elif len(selected_vertices) == 1 and vertex_under_cursor and vertex_under_cursor != selected_vertices[0]:
+            selected_vert = selected_vertices[0]
+            
+            edge_exists = False
+            for edge in selected_vert.link_edges:
+                if vertex_under_cursor in edge.verts:
+                    edge_exists = True
+                    break
+            
+            if not edge_exists:
+                try:
+                    result = bmesh.ops.connect_vert_pair(bm, verts=[selected_vert, vertex_under_cursor])
+                    connections_created = 1 if result.get('edges') else 0
+                except:
+                    try:
+                        result = bmesh.ops.connect_verts(bm, verts=[selected_vert, vertex_under_cursor])
+                        connections_created = 1 if result.get('edges') else 0
+                    except:
+                        try:
+                            bm.edges.new([selected_vert, vertex_under_cursor])
+                            connections_created = 1
+                        except ValueError:
+                            connections_created = 0
+                
+                bm.edges.ensure_lookup_table()
+                bm.verts.ensure_lookup_table()
+                bm.faces.ensure_lookup_table()
+                
+                for e in bm.edges:
+                    e.select = False
+                for v in bm.verts:
+                    v.select = False
+                for f in bm.faces:
+                    f.select = False
+                
+                vertex_under_cursor.select = True
+                bm.select_history.clear()
+                bm.select_history.add(vertex_under_cursor)
+                
+                bmesh.update_edit_mesh(obj.data, loop_triangles=True, destructive=True)
+                for area in context.screen.areas:
+                    if area.type == 'VIEW_3D':
+                        area.tag_redraw()
+                
+                return {'FINISHED'}
+            else:
+                self.report({'INFO'}, "Вершины уже соединены")
+                return {'FINISHED'}
+        
+        # Если вершины под курсором нет, продолжаем как раньше
         select_mode = context.tool_settings.mesh_select_mode
         is_edge_mode = select_mode[1]
         
