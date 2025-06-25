@@ -1,17 +1,17 @@
 bl_info = {
     "name": "Fast Project Creator",
-    "author": "Your Name",
-    "version": (1, 2),
+    "author": "Gwyn",
+    "version": (1, 3),
     "blender": (2, 80, 0),
-    "location": "Status Bar > New Project Icon",
-    "description": "Creates a project folder structure, collections, saves blend file, and opens folder in Explorer",
+    "location": "Info Header > New Project Icon",
+    "description": "Creates a project folder structure, collections, saves blend file, and opens folder in Explorer. Shift+Click opens current project folder",
     "category": "3D View",
 }
 
 import bpy
 import os
 import subprocess
-from bpy.types import Operator, Panel, AddonPreferences
+from bpy.types import Operator, AddonPreferences
 from bpy.props import StringProperty
 
 class FASTPROJECT_AddonPreferences(AddonPreferences):
@@ -30,10 +30,36 @@ class FASTPROJECT_AddonPreferences(AddonPreferences):
         layout.label(text="Fast Project Creator Settings:")
         layout.prop(self, "base_directory")
 
+class FASTPROJECT_OT_OpenCurrentProject(Operator):
+    bl_idname = "fastproject.open_current_project"
+    bl_label = "Open Current Project Folder"
+    bl_description = "Open the folder containing the current blend file in Windows Explorer"
+
+    def execute(self, context):
+        current_blend_path = bpy.data.filepath
+        
+        if not current_blend_path:
+            self.report({'ERROR'}, "No blend file is currently saved. Please save your project first.")
+            return {'CANCELLED'}
+        
+        project_folder = os.path.dirname(current_blend_path)
+        
+        if not os.path.exists(project_folder):
+            self.report({'ERROR'}, f"Project folder does not exist: {project_folder}")
+            return {'CANCELLED'}
+        
+        try:
+            subprocess.run(["explorer", project_folder])
+            self.report({'INFO'}, f"Opened project folder: {project_folder}")
+            return {'FINISHED'}
+        except Exception as e:
+            self.report({'ERROR'}, f"Failed to open project folder: {str(e)}")
+            return {'CANCELLED'}
+
 class FASTPROJECT_OT_CreateProject(Operator):
     bl_idname = "fastproject.create_project"
     bl_label = "Start New Project"
-    bl_description = "Create a new project with folder structure and collections"
+    bl_description = "Create a new project with folder structure and collections. Hold Shift to open current project folder instead"
 
     project_name: StringProperty(
         name="Project Name",
@@ -42,12 +68,10 @@ class FASTPROJECT_OT_CreateProject(Operator):
     )
 
     def get_base_directory(self, context):
-        """Get the base directory from addon preferences."""
         addon_prefs = context.preferences.addons[__name__].preferences
         return addon_prefs.base_directory
 
     def get_unique_project_path(self, base_dir, project_name):
-        """Generate a unique project path by appending _1, _2, etc. if needed."""
         base_path = os.path.join(base_dir, project_name)
         if not os.path.exists(base_path):
             return project_name, base_path
@@ -61,38 +85,30 @@ class FASTPROJECT_OT_CreateProject(Operator):
             counter += 1
 
     def create_collections(self, context, project_name):
-        """Create a parent collection with the project name and child collections inside it."""
         child_collections = [
             ("Blockout", "COLOR_04"),  # Green
             ("High Poly", "COLOR_05"), # Blue
             ("Low Poly", "COLOR_06")   # Pink
         ]
         
-        # Проверяем, существует ли родительская коллекция с именем проекта
         parent_coll = bpy.data.collections.get(project_name)
         if not parent_coll:
-            # Если нет, создаем новую родительскую коллекцию
             parent_coll = bpy.data.collections.new(project_name)
-            # Связываем родительскую коллекцию со сценой
             context.scene.collection.children.link(parent_coll)
         
-        # Создаем или получаем дочерние коллекции и связываем их с родительской
         for coll_name, color_tag in child_collections:
             child_coll = bpy.data.collections.get(coll_name)
             if not child_coll:
                 child_coll = bpy.data.collections.new(coll_name)
                 child_coll.color_tag = color_tag
-            # Связываем дочернюю коллекцию с родительской, если еще не связана
             if child_coll.name not in parent_coll.children:
                 parent_coll.children.link(child_coll)
 
     def save_blend_file(self, project_path, project_name):
-        """Save the current blend file in the Model folder with project name."""
         model_folder = os.path.join(project_path, "Model")
         blend_file_path = os.path.join(model_folder, f"{project_name}.blend")
         
         try:
-            # Сохраняем blend файл
             bpy.ops.wm.save_as_mainfile(filepath=blend_file_path)
             return True, blend_file_path
         except Exception as e:
@@ -103,10 +119,8 @@ class FASTPROJECT_OT_CreateProject(Operator):
             self.report({'ERROR'}, "Project name cannot be empty!")
             return {'CANCELLED'}
 
-        # Get base directory from preferences
         BASE_DIR = self.get_base_directory(context)
         
-        # Check if base directory exists
         if not os.path.exists(BASE_DIR):
             self.report({'ERROR'}, f"Base directory does not exist: {BASE_DIR}")
             return {'CANCELLED'}
@@ -114,20 +128,14 @@ class FASTPROJECT_OT_CreateProject(Operator):
         folders = ["Reference", "Model", "Baking", "Textures", "Render"]
 
         try:
-            # Get unique project name and path
             final_project_name, project_path = self.get_unique_project_path(BASE_DIR, self.project_name)
-
-            # Create main project folder
             os.makedirs(project_path, exist_ok=True)
             
-            # Create subfolders
             for folder in folders:
                 os.makedirs(os.path.join(project_path, folder), exist_ok=True)
             
-            # Create collections in Blender with the project name
             self.create_collections(context, final_project_name)
             
-            # Save blend file in Model folder
             save_success, save_result = self.save_blend_file(project_path, final_project_name)
             
             if save_success:
@@ -135,7 +143,6 @@ class FASTPROJECT_OT_CreateProject(Operator):
             else:
                 self.report({'WARNING'}, f"Project '{final_project_name}' created but failed to save blend file: {save_result}")
             
-            # Open the project folder in Windows Explorer
             subprocess.run(["explorer", project_path])
             
             return {'FINISHED'}
@@ -145,26 +152,39 @@ class FASTPROJECT_OT_CreateProject(Operator):
             return {'CANCELLED'}
 
     def invoke(self, context, event):
-        return context.window_manager.invoke_props_dialog(self)
+        if event.shift:
+            bpy.ops.fastproject.open_current_project()
+            return {'FINISHED'}
+        else:
+            return context.window_manager.invoke_props_dialog(self)
 
-def draw_status_bar_button(self, context):
-    """Draw the New Project button in the Status Bar."""
-    layout = self.layout
-    layout.separator()
-    layout.operator("fastproject.create_project", text="New Project", icon='FILE_NEW')
+def draw_project_buttons(self, context):
+    """Draw the New Project button in the Header, similar to GoB."""
+    if context.region.alignment == 'RIGHT':
+        layout = self.layout
+        row = layout.row(align=True)
+
+        row.operator(
+            operator="fastproject.create_project",
+            text="New",
+            emboss=True,
+            icon='FILE_NEW'
+        )
 
 def register():
     bpy.utils.register_class(FASTPROJECT_AddonPreferences)
+    bpy.utils.register_class(FASTPROJECT_OT_OpenCurrentProject)
     bpy.utils.register_class(FASTPROJECT_OT_CreateProject)
     
-    # Add button to Status Bar
-    bpy.types.STATUSBAR_HT_header.append(draw_status_bar_button)
+    # Append button to header
+    bpy.types.TOPBAR_HT_upper_bar.append(draw_project_buttons)
 
 def unregister():
-    # Remove button from Status Bar
-    bpy.types.STATUSBAR_HT_header.remove(draw_status_bar_button)
+    # Remove button from header
+    bpy.types.TOPBAR_HT_upper_bar.remove(draw_project_buttons)
     
     bpy.utils.unregister_class(FASTPROJECT_OT_CreateProject)
+    bpy.utils.unregister_class(FASTPROJECT_OT_OpenCurrentProject)
     bpy.utils.unregister_class(FASTPROJECT_AddonPreferences)
 
 if __name__ == "__main__":
