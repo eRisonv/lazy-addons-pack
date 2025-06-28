@@ -10,10 +10,14 @@ def draw_item(self, context):
     EaSel_OFF = pcoll["EaSel_OFF"]
     
     layout = self.layout
-    layout.prop(easel_tool, 'easel_button', text="", icon_value=pcoll["EaSel_ON"].icon_id if easel_tool.easel_button else pcoll["EaSel_OFF"].icon_id)
-      
+    
+    # Создаем оператор с проверкой Shift
+    props = layout.operator("easel.smart_toggle", text="", 
+                           icon_value=pcoll["EaSel_ON"].icon_id if easel_tool.easel_button else pcoll["EaSel_OFF"].icon_id)
+
 
 preview_collections = {}
+
 def register():
     import bpy.utils.previews
     pcoll = bpy.utils.previews.new()
@@ -23,6 +27,7 @@ def register():
     pcoll.load("EaSel_OFF", os.path.join(my_icons_dir, "EaSel_OFF.png"), 'IMAGE')
     preview_collections["main"] = pcoll   
     
+    # Добавляем в хедер
     bpy.types.VIEW3D_HT_header.append(draw_item)
 
 
@@ -31,5 +36,5 @@ def unregister():
         bpy.utils.previews.remove(pcoll)
     preview_collections.clear()
     
-    
+    # Удаляем из хедера
     bpy.types.VIEW3D_HT_header.remove(draw_item)
