@@ -523,6 +523,57 @@ class MESH_OT_clear_seam(bpy.types.Operator):
         
         return {'FINISHED'}
 
+class MESH_OT_unmark_all(bpy.types.Operator):
+    bl_idname = "mesh.unmark_all"
+    bl_label = "Unmark All"
+    bl_description = "Снимает все пометки (Sharp, Seam, Bevel Weight, Crease) с выделенных рёбер"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        obj = context.active_object
+        if obj is None or obj.type != 'MESH':
+            self.report({'ERROR'}, "Активный объект не является мешем")
+            return {'CANCELLED'}
+
+        # Сохраняем текущий режим выбора
+        original_mode = get_current_select_mode(context)
+
+        if context.mode != 'EDIT_MESH':
+            bpy.ops.object.mode_set(mode='EDIT')
+
+        mesh = obj.data
+        bm = bmesh.from_edit_mesh(mesh)
+
+        # Получаем или создаём слои
+        crease_layer = bm.edges.layers.float.get("crease_edge")
+        if crease_layer is None:
+            crease_layer = bm.edges.layers.float.new("crease_edge")
+
+        bevel_weight_layer = bm.edges.layers.float.get("bevel_weight_edge")
+        if bevel_weight_layer is None:
+            bevel_weight_layer = bm.edges.layers.float.new("bevel_weight_edge")
+
+        selected_count = 0
+        for edge in bm.edges:
+            if edge.select:
+                # Убираем Sharp
+                edge.smooth = True
+                # Убираем Seam
+                edge.seam = False
+                # Убираем Bevel Weight
+                edge[bevel_weight_layer] = 0.0
+                # Убираем Crease
+                edge[crease_layer] = 0.0
+                selected_count += 1
+
+        bmesh.update_edit_mesh(mesh)
+        
+        # Восстанавливаем оригинальный режим выбора
+        restore_select_mode(context, original_mode)
+        
+        self.report({'INFO'}, f"Unmarked {selected_count} edges")
+        return {'FINISHED'}
+
 # Оператор: Выбор объектов с неравномерным масштабом
 class OBJECT_OT_select_non_uniform_scale(bpy.types.Operator):
     bl_idname = "object.select_non_uniform_scale"
@@ -614,14 +665,26 @@ class VIEW3D_PT_my_tools_panel(bpy.types.Panel):
         # Bevel Weight кнопки (теперь сверху)
         row = layout.row(align=True)
         row.label(text="Bevel Weight:")
-        row.operator("mesh.set_bevel_weight_zero", text="0")
-        row.operator("mesh.set_bevel_weight_one", text="1")
+        
+        # Кнопка 0 - обычная
+        row.operator("mesh.bevel_weight_zero_button", text="0")
+        
+        # Кнопка 1 - с синей обводкой как у bevel weight
+        sub = row.row(align=True)
+        #sub.alert = True  # Красная обводка
+        sub.operator("mesh.bevel_weight_one_button", text="1")
         
         # Crease кнопки (теперь снизу)
         row = layout.row(align=True)
         row.label(text="Crease:")
-        row.operator("mesh.set_crease_zero", text="0")
-        row.operator("mesh.set_crease_one", text="1")
+        
+        # Кнопка 0 - обычная
+        row.operator("mesh.crease_zero_button", text="0")
+        
+        # Кнопка 1 - с красной обводкой как у crease
+        sub = row.row(align=True)
+        #sub.alert = True  # Красная обводка
+        sub.operator("mesh.crease_one_button", text="1")
         
         # Select Tools аккордеон
         box = layout.box()
@@ -648,6 +711,9 @@ class VIEW3D_PT_my_tools_panel(bpy.types.Panel):
             row = box.row(align=True)
             row.operator("mesh.mark_seam_custom", text="Mark Seam")
             row.operator("mesh.clear_seam_custom", text="Clear Seam")
+            box.separator(factor=0.5)
+            box.operator("mesh.unmark_all", text="Unmark All")
+            
         
         # Length Settings аккордеон
         box = layout.box()
@@ -679,6 +745,43 @@ class IMAGE_EDITOR_PT_my_uv_tools(bpy.types.Panel):
         layout = self.layout
         layout.operator("uv.straight_uv_island", text="Straight UV Square")
 
+# Кастомные операторы для кнопок с цветом
+class MESH_OT_bevel_weight_zero_button(bpy.types.Operator):
+    bl_idname = "mesh.bevel_weight_zero_button"
+    bl_label = "0"
+    bl_description = "Устанавливает Bevel Weight в 0 для выделенных рёбер"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        return bpy.ops.mesh.set_bevel_weight_zero()
+
+class MESH_OT_bevel_weight_one_button(bpy.types.Operator):
+    bl_idname = "mesh.bevel_weight_one_button"
+    bl_label = "1"
+    bl_description = "Устанавливает Bevel Weight в 1 для выделенных рёбер"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        return bpy.ops.mesh.set_bevel_weight_one()
+
+class MESH_OT_crease_zero_button(bpy.types.Operator):
+    bl_idname = "mesh.crease_zero_button"
+    bl_label = "0"
+    bl_description = "Устанавливает Crease в 0 для выделенных рёбер"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        return bpy.ops.mesh.set_crease_zero()
+
+class MESH_OT_crease_one_button(bpy.types.Operator):
+    bl_idname = "mesh.crease_one_button"
+    bl_label = "1"
+    bl_description = "Устанавливает Crease в 1 для выделенных рёбер"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        return bpy.ops.mesh.set_crease_one()
+
 # Регистрация классов
 classes = (
     MESH_OT_select_crease_edges,
@@ -688,12 +791,17 @@ classes = (
     MESH_OT_set_bevel_weight_zero,
     MESH_OT_select_bevel_weight_edges,
     MESH_OT_select_sharp_edges,
+    MESH_OT_unmark_all,
     MESH_OT_mark_sharp,
     MESH_OT_clear_sharp,
     MESH_OT_mark_seam,
     MESH_OT_clear_seam,
     OBJECT_OT_select_non_uniform_scale,
     UV_OT_straight_uv_island,
+    MESH_OT_bevel_weight_zero_button,
+    MESH_OT_bevel_weight_one_button,
+    MESH_OT_crease_zero_button,
+    MESH_OT_crease_one_button,
     VIEW3D_PT_my_tools_panel,
     IMAGE_EDITOR_PT_my_uv_tools,
 )
