@@ -102,6 +102,32 @@ class OBJECT_OT_subdivision_toggle(Operator):
 
         return {'FINISHED'}
 
+class OBJECT_OT_subdivision_optimal_toggle(Operator):
+    """Toggle Subdivision Optimal Display"""
+    bl_idname = "object.subdivision_optimal_toggle"
+    bl_label = "Toggle Subdivision Optimal Display"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        return context.active_object is not None
+
+    def execute(self, context):
+        obj = context.active_object
+        subsurf_mod = next((mod for mod in obj.modifiers if mod.type == 'SUBSURF'), None)
+
+        if subsurf_mod:
+            # Переключаем Optimal Display если модификатор существует
+            subsurf_mod.show_only_control_edges = not subsurf_mod.show_only_control_edges
+            status = "enabled" if subsurf_mod.show_only_control_edges else "disabled"
+        else:
+            # Создаем новый модификатор если его нет
+            subsurf_mod = obj.modifiers.new(name="Subdivision", type='SUBSURF')
+            subsurf_mod.levels = 2
+            subsurf_mod.show_only_control_edges = True
+
+        return {'FINISHED'}
+
 class VIEW3D_OT_toggle_wireframe(Operator):
     """Toggle between Wireframe and previous shading mode"""
     bl_idname = "view3d.toggle_wireframe"
@@ -137,6 +163,69 @@ class VIEW3D_OT_toggle_wireframe(Operator):
                         break
         return {'FINISHED'}
 
+class MESH_OT_toggle_hide_reveal(Operator):
+    """Toggle between Hide Selected (Unselected) and Reveal Hidden (Select off)"""
+    bl_idname = "mesh.toggle_hide_reveal"
+    bl_label = "Toggle Hide/Reveal"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        return (context.active_object is not None and 
+                context.active_object.type == 'MESH' and 
+                context.active_object.mode in ['EDIT', 'OBJECT'])
+
+    def execute(self, context):
+        obj = context.active_object
+        
+        # Проверяем режим объекта
+        if obj.mode == 'OBJECT':
+            # В Object Mode работаем с объектами
+            scene = context.scene
+            
+            # Используем custom property для отслеживания состояния
+            hide_state_key = "hide_reveal_state"
+            
+            if hide_state_key not in scene:
+                scene[hide_state_key] = False
+            
+            if not scene[hide_state_key]:
+                # Hide Selected (Unselected) - скрываем невыделенные объекты
+                for ob in scene.objects:
+                    if ob.type == 'MESH':
+                        if not ob.select_get():
+                            ob.hide_set(True)
+                scene[hide_state_key] = True
+            else:
+                # Reveal Hidden (Select off) - показываем скрытые объекты без выделения
+                for ob in scene.objects:
+                    if ob.type == 'MESH' and ob.hide_get():
+                        ob.hide_set(False)
+                        ob.select_set(False)
+                scene[hide_state_key] = False
+        
+        elif obj.mode == 'EDIT':
+            # В Edit Mode работаем с элементами меша
+            scene = context.scene
+            mesh = obj.data
+            
+            # Используем custom property для отслеживания состояния в Edit Mode
+            hide_state_key = "edit_hide_reveal_state"
+            
+            if hide_state_key not in scene:
+                scene[hide_state_key] = False
+            
+            if not scene[hide_state_key]:
+                # Hide Selected (Unselected) - скрываем невыделенные элементы
+                bpy.ops.mesh.hide(unselected=True)
+                scene[hide_state_key] = True
+            else:
+                # Reveal Hidden - показываем скрытые элементы без выделения
+                bpy.ops.mesh.reveal(select=False)
+                scene[hide_state_key] = False
+        
+        return {'FINISHED'}
+
 class ShortcutsPreferences(AddonPreferences):
     bl_idname = __name__
 
@@ -155,7 +244,9 @@ class ShortcutsPreferences(AddonPreferences):
             {"operator": "object.switch_to_face_mode", "label": "Face Mode", "keymap_name": "Object Mode", "space_type": 'EMPTY'},
             {"operator": "mesh.switch_to_object_mode", "label": "Object Mode", "keymap_name": "Mesh", "space_type": 'EMPTY'},
             {"operator": "object.subdivision_toggle", "label": "Toggle Subdivision", "keymap_name": "3D View", "space_type": 'VIEW_3D'},
+            {"operator": "object.subdivision_optimal_toggle", "label": "Toggle Subdivision Optimal Display", "keymap_name": "3D View", "space_type": 'VIEW_3D'},
             {"operator": "view3d.toggle_wireframe", "label": "Toggle Wireframe", "keymap_name": "3D View", "space_type": 'VIEW_3D'},
+            {"operator": "mesh.toggle_hide_reveal", "label": "Toggle Hide/Reveal", "keymap_name": "3D View", "space_type": 'VIEW_3D'},
         ]
 
         for entry in keymap_entries:
@@ -206,6 +297,8 @@ def register_keymaps():
         ("3D View", 'VIEW_3D', [
             ("view3d.toggle_wireframe", 'W', {'ctrl': True, 'shift': True}),  # Изменено на Ctrl+Shift+W
             ("object.subdivision_toggle", 'SIX', {}),
+            ("object.subdivision_optimal_toggle", 'SIX', {'shift': True}),  # Shift+6 для Optimal Display
+            ("mesh.toggle_hide_reveal", 'H', {'shift': True}),  # Shift+H для Hide/Reveal Toggle
         ]),
         ("Object Mode", 'EMPTY', [
             ("object.switch_to_vertex_mode", 'ONE', {'ctrl': True}),
@@ -229,7 +322,9 @@ classes = [
     OBJECT_OT_switch_to_face_mode,
     MESH_OT_switch_to_object_mode,
     OBJECT_OT_subdivision_toggle,
+    OBJECT_OT_subdivision_optimal_toggle,
     VIEW3D_OT_toggle_wireframe,
+    MESH_OT_toggle_hide_reveal,
     ShortcutsPreferences,
 ]
 
